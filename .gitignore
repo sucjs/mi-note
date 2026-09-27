@@ -1,0 +1,9 @@
+# 依赖与系统文件
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+
+# 注意：dist/ 刻意不忽略。
+# 插件通过仓库内直接下载分发（GitHub Releases 同时提供），
+# 产物需要被 git 跟踪才能在网页上点开下载。
