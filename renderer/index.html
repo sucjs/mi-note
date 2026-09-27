@@ -473,17 +473,30 @@
         padding: 6px 9px; background: var(--bg); font-size: 12.5px; resize: none;
       }
 
-      .toast {
+      /*
+       * 提示条堆叠容器。
+       *
+       * 以前只有一个 #toast 元素，新提示会直接覆盖旧提示 ——
+       * 「已删除·撤销」这种带操作按钮的提示被一条普通提示冲掉后，
+       * 按钮消失但 6 秒计时器还在跑，笔记照样被删且无法撤销（丢数据）。
+       * 改成堆叠：多条提示共存，互不影响。
+       */
+      .toast-stack {
         position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
-        z-index: 60; max-width: 70vw;
+        z-index: 60;
+        display: flex; flex-direction: column-reverse; align-items: center; gap: 8px;
+        max-width: 70vw;
+        pointer-events: none;
+      }
+      .toast {
         border: 1px solid var(--border-strong); border-radius: 10px;
         padding: 8px 14px; background: var(--surface-2);
         color: var(--fg); font-size: 12.5px;
         box-shadow: 0 12px 30px -12px rgb(0 0 0 / .55);
+        pointer-events: auto;
       }
-      .toast[hidden] { display: none; }
       .toast[data-level="error"] { border-color: color-mix(in oklab, var(--danger) 45%, transparent); color: var(--danger); }
-      /* 带「撤销」按钮的 toast：正文与按钮横排 */
+      /* 带「撤销」按钮的提示条：正文与按钮横排 */
       .toast .toast-row { display: flex; align-items: center; gap: 10px; }
       .toast .toast-action {
         flex: 0 0 auto;
@@ -602,7 +615,7 @@
       </div>
     </div>
 
-    <div class="toast" id="toast" hidden></div>
+    <div class="toast-stack" id="toastStack"></div>
 
     <script>
       (function () {
@@ -644,14 +657,52 @@
           }
         };
 
-        let toastTimer = null;
-        const toast = (message, level) => {
-          const el = $("toast");
-          el.textContent = message;
+        /*
+         * ── 提示条 ──────────────────────────────────────────────────────────
+         *
+         * 多条提示可以同时存在（堆叠显示），互不覆盖。
+         *
+         * 这是修一个会丢数据的缺陷：以前所有提示共用一个元素，
+         * 新提示直接 `textContent =` 覆盖旧的 ——「已删除·撤销」的按钮被冲掉后，
+         * 6 秒计时器仍在跑，笔记照样被删且无法撤销。
+         */
+        const TOAST_MAX = 3;
+        const toastStack = () => $("toastStack");
+
+        /** 移除一条提示；同一条重复调用无副作用。 */
+        const removeToast = (el) => {
+          if (!el || !el.parentNode) return;
+          el.remove();
+        };
+
+        /**
+         * 建一条提示。
+         * @returns {{el:HTMLElement, dismiss:()=>void}}
+         */
+        const pushToast = (level, durationMs) => {
+          const el = document.createElement("div");
+          el.className = "toast";
           el.dataset.level = level || "info";
-          el.hidden = false;
-          if (toastTimer) clearTimeout(toastTimer);
-          toastTimer = setTimeout(() => { el.hidden = true; }, level === "error" ? 6000 : 3200);
+          toastStack().appendChild(el);
+          const stack = toastStack();
+          while (stack.children.length > TOAST_MAX) stack.firstElementChild.remove();
+
+          let timer = null;
+          let done = false;
+          const dismiss = () => {
+            if (done) return;
+            done = true;
+            if (timer) clearTimeout(timer);
+            timer = null;
+            removeToast(el);
+          };
+          if (durationMs > 0) timer = setTimeout(dismiss, durationMs);
+          return { el, dismiss };
+        };
+
+        const toast = (message, level) => {
+          const { el } = pushToast(level, level === "error" ? 6000 : 3200);
+          el.textContent = message;
         };
 
         /**
@@ -660,11 +711,8 @@
          * 返回一个函数，调用它可立即收起提示（撤销或超时后调用，
          * 避免旧提示还在屏幕上但已经失效）。
          */
-        let actionToastTimer = null;
         const toastWithAction = (message, actionLabel, onAction, durationMs = 6000) => {
-          const el = $("toast");
-          el.dataset.level = "info";
-          el.textContent = "";
+          const { el, dismiss } = pushToast("info", durationMs);
 
           const row = document.createElement("div");
           row.className = "toast-row";
@@ -676,26 +724,11 @@
           action.textContent = actionLabel;
           row.append(text, action);
           el.appendChild(row);
-          el.hidden = false;
 
-          let done = false;
-          const dismiss = () => {
-            if (done) return;
-            done = true;
-            if (actionToastTimer) {
-              clearTimeout(actionToastTimer);
-              actionToastTimer = null;
-            }
-            action.removeEventListener("click", onActionClick);
-            el.hidden = true;
-          };
-          const onActionClick = () => {
+          action.addEventListener("click", () => {
             dismiss();
             onAction();
-          };
-          action.addEventListener("click", onActionClick);
-          if (actionToastTimer) clearTimeout(actionToastTimer);
-          actionToastTimer = setTimeout(dismiss, durationMs);
+          });
           return dismiss;
         };
 
@@ -772,6 +805,8 @@
           pendingDelete: new Set(),
           /* IME 合成中标记：合成期间只更新内存，不触发保存 */
           composing: false,
+          /* 切编辑/预览时的光标与滚动快照，重建 textarea 后还原 */
+          pendingEditorView: null,
           loginJobId: null,
           loginExpiresAt: 0,
           loginTimer: null,
@@ -951,6 +986,9 @@
           if (state.loginTimer) clearInterval(state.loginTimer);
           const jobId = state.loginJobId;
           if (!jobId) return;
+          // 登录过程会改状态文案（已确认/首次同步中），登记为进行中的任务，
+          // 免得 20 秒的状态轮询把它覆盖成「尚未登录」。
+          state.jobs.add(jobId);
           state.loginTimer = setInterval(async () => {
             const res = await invoke("mn.job.get", { jobId });
             const job = res.job;
@@ -967,6 +1005,7 @@
             }
             clearInterval(state.loginTimer);
             state.loginTimer = null;
+            state.jobs.delete(jobId);
             if (job.status === "done") {
               setLoginHint("登录成功，正在加载笔记…");
               hideLogin();
@@ -1275,6 +1314,34 @@
           await saveNote({ auto: true });
         };
 
+        /*
+         * 记住编辑区里 textarea 的光标与滚动位置。
+         *
+         * renderEditor 是「销毁 + 重建」，切到预览再切回来 textarea 是全新的，
+         * 不还原的话光标会跳到末尾、滚动回到顶部（实测 caret 12 → 184）。
+         * 这里在切换前抓一份，重建后还原。
+         */
+        const captureEditorView = () => {
+          const ta = document.querySelector(".md-input");
+          if (!ta) return null;
+          return {
+            id: state.draft.id,
+            caret: ta.selectionStart,
+            scrollTop: ta.scrollTop,
+          };
+        };
+
+        const restoreEditorView = (snapshot) => {
+          if (!snapshot || snapshot.id !== state.draft.id) return;
+          const ta = document.querySelector(".md-input");
+          if (!ta) return;
+          // 正文可能在别处被改短了，先夹到合法范围再设置，避免越界异常
+          const caret = Math.max(0, Math.min(snapshot.caret, ta.value.length));
+          ta.focus({ preventScroll: true });
+          ta.setSelectionRange(caret, caret);
+          ta.scrollTop = snapshot.scrollTop;
+        };
+
         const renderEditor = () => {
           const body = $("editorBody");
           body.textContent = "";
@@ -1323,6 +1390,9 @@
               setDirty(true);
             });
             body.appendChild(textarea);
+            // 若是从预览切回来的，还原光标与滚动
+            restoreEditorView(state.pendingEditorView);
+            state.pendingEditorView = null;
           } else {
             const view = document.createElement("div");
             view.className = "md-view";
@@ -1339,6 +1409,15 @@
 
         for (const tab of document.querySelectorAll(".tab")) {
           tab.addEventListener("click", () => {
+            if (tab.dataset.mode === state.mode) return;
+            /*
+             * 只在「离开编辑模式」时抓快照。
+             * 从预览切回编辑时页面上没有 textarea，captureEditorView 会返回 null，
+             * 若不加判断就会把上一步存好的快照覆盖掉，光标照样丢失。
+             */
+            if (state.mode === "edit") {
+              state.pendingEditorView = captureEditorView();
+            }
             state.mode = tab.dataset.mode;
             for (const other of document.querySelectorAll(".tab")) {
               other.dataset.active = String(other === tab);
@@ -1373,6 +1452,8 @@
             dirty: false,
           };
           state.composing = false;
+          // 换了一篇笔记，旧的光标快照不再适用
+          state.pendingEditorView = null;
           $("titleInput").value = state.draft.title;
           $("savedHint").textContent = "";
           $("btnSave").disabled = true;
@@ -1585,10 +1666,11 @@
             return;
           }
           const jobId = res.jobId;
+          state.jobs.add(jobId);
           const poll = setInterval(async () => {
             const jobRes = await invoke("mn.job.get", { jobId });
             const job = jobRes.job;
-            if (!job) { clearInterval(poll); return; }
+            if (!job) { clearInterval(poll); state.jobs.delete(jobId); return; }
             if (job.status === "running") {
               const p = job.progress || {};
               if (p.phase === "bodies" && p.total) setStatus(`正在同步正文 ${p.done || 0}/${p.total}…`, "busy");
@@ -1596,6 +1678,7 @@
               return;
             }
             clearInterval(poll);
+            state.jobs.delete(jobId);
             if (job.status === "done") {
               await refreshStatus();
               await loadFolders();
