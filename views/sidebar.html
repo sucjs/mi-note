@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="pi-plugin-chrome" content="v3" />
+    <title>小米笔记</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #181818;
+        --surface: #1f1f1f;
+        --hover: color-mix(in oklab, #ffffff 6%, transparent);
+        --fg: #ffffff;
+        --secondary: color-mix(in oklab, #ffffff 70%, transparent);
+        --muted: color-mix(in oklab, #ffffff 50%, transparent);
+        --faint: color-mix(in oklab, #ffffff 32%, transparent);
+        --border: color-mix(in oklab, #ffffff 8%, transparent);
+        --border-strong: color-mix(in oklab, #ffffff 16%, transparent);
+        --accent: #ff6a00;
+        --accent-soft: color-mix(in oklab, var(--accent) 18%, transparent);
+        --danger: #ff6764;
+        --ok: #4ec97a;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      :root[data-base="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --surface: #f7f7f7;
+        --hover: color-mix(in oklab, #1a1c1f 5%, transparent);
+        --fg: #1a1c1f;
+        --secondary: color-mix(in oklab, #1a1c1f 74%, transparent);
+        --muted: #5d5d5d;
+        --faint: #9a9a9a;
+        --border: color-mix(in oklab, #1a1c1f 7%, transparent);
+        --border-strong: color-mix(in oklab, #1a1c1f 15%, transparent);
+        --danger: #d92b26;
+        --ok: #1f9d4e;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--fg);
+        font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      #root { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+      button, input { font: inherit; color: inherit; }
+      button { cursor: pointer; }
+      button:focus-visible, input:focus-visible {
+        outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
+        outline-offset: 1px;
+      }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-thumb {
+        border: 2px solid transparent; border-radius: 8px; background-clip: content-box;
+        background-color: color-mix(in oklab, var(--fg) 18%, transparent);
+      }
+      ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in oklab, var(--fg) 30%, transparent); }
+      ::-webkit-scrollbar-track { background: transparent; }
+
+      .head {
+        flex: 0 0 auto;
+        padding: 8px 10px 6px;
+        border-bottom: 1px solid var(--border);
+      }
+      .head-row { display: flex; align-items: center; gap: 6px; }
+      .head-title { font-size: 12.5px; font-weight: 600; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
+      .dot[data-state="ok"] { background: var(--ok); }
+      .dot[data-state="busy"] { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+      .dot[data-state="warn"] { background: var(--danger); }
+      @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+      .head-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        color: var(--muted); font-size: 10.5px; }
+      .icon-btn {
+        flex: 0 0 auto;
+        border: 1px solid var(--border-strong); border-radius: 6px;
+        padding: 2px 7px; background: transparent; color: var(--secondary);
+        font-size: 11px; transition: background .14s ease, color .14s ease;
+      }
+      .icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+      .icon-btn:disabled { opacity: .4; cursor: default; }
+
+      .search-wrap { padding: 7px 10px 8px; }
+      .search {
+        width: 100%;
+        border: 1px solid var(--border-strong); border-radius: 7px;
+        padding: 4px 8px; background: var(--bg); font-size: 12px;
+      }
+      .search::placeholder { color: var(--faint); }
+
+      .scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 10px; }
+
+      .row {
+        display: flex; align-items: center; gap: 6px;
+        width: calc(100% - 12px); margin: 1px 6px;
+        border: 0; border-radius: 7px;
+        padding: 6px 8px;
+        background: transparent; text-align: left;
+        transition: background .13s ease;
+      }
+      .row:hover { background: var(--hover); }
+      .row[data-open="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+      .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+      .row-title {
+        color: var(--fg); font-size: 12.5px; font-weight: 500;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .row-meta {
+        display: flex; gap: 5px;
+        color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums;
+      }
+      .row-meta .folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .row-open {
+        flex: 0 0 auto;
+        border: 1px solid transparent; border-radius: 6px;
+        padding: 3px 6px; background: transparent;
+        color: var(--faint); font-size: 10.5px; opacity: 0;
+        transition: opacity .13s ease, background .13s ease, color .13s ease;
+      }
+      .row:hover .row-open, .row-open:focus-visible { opacity: 1; }
+      .row-open:hover { background: var(--hover); color: var(--fg); border-color: var(--border-strong); }
+
+      .empty { padding: 22px 16px; color: var(--muted); text-align: center; font-size: 11.5px; line-height: 1.65; }
+
+      /* ── 阅读视图 ── */
+      
+      .reader { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); z-index: 2; }
+      .reader[hidden] { display: none; }
+      .reader-bar {
+        flex: 0 0 auto;
+        display: flex; align-items: center; gap: 6px;
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .reader-bar .back { flex: 0 0 auto; }
+      .reader-bar .title {
+        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 12.5px; font-weight: 600;
+      }
+      .reader-scroll { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 40px; }
+      .reader-meta {
+        display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;
+        color: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums;
+      }
+      .md { font-size: 12.5px; line-height: 1.68; word-wrap: break-word; }
+      .md > *:first-child { margin-top: 0; }
+      .md h1 { font-size: 1.4em; margin: 1.1em 0 .4em; padding-bottom: .2em; border-bottom: 1px solid var(--border); }
+      .md h2 { font-size: 1.2em; margin: 1.1em 0 .4em; }
+      .md h3, .md h4, .md h5, .md h6 { font-size: 1.05em; margin: 1em 0 .35em; }
+      .md p { margin: .6em 0; }
+      .md ul, .md ol { margin: .5em 0; padding-left: 1.5em; }
+      .md li { margin: .18em 0; }
+      .md code {
+        border-radius: 4px; padding: .1em .32em;
+        background: color-mix(in oklab, var(--fg) 9%, transparent);
+        font-family: var(--mono); font-size: .88em;
+      }
+      .md pre {
+        margin: .7em 0; overflow: auto;
+        border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
+        background: color-mix(in oklab, var(--fg) 4%, transparent);
+      }
+      .md pre code { background: transparent; padding: 0; }
+      .md blockquote {
+        margin: .7em 0; padding: .1em 0 .1em .9em;
+        border-left: 3px solid color-mix(in oklab, var(--fg) 20%, transparent);
+        color: var(--secondary);
+      }
+      .md hr { height: 1px; margin: 1.3em 0; border: 0; background: var(--border-strong); }
+      .md a { color: var(--accent); }
+      .md img { max-width: 100%; border-radius: 6px; }
+      .md table { border-collapse: collapse; margin: .7em 0; font-size: .95em; }
+      .md th, .md td { border: 1px solid var(--border-strong); padding: 3px 8px; }
+      .md th { background: color-mix(in oklab, var(--fg) 5%, transparent); }
+
+      .toast {
+        position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+        z-index: 20; max-width: 88%;
+        border: 1px solid var(--border-strong); border-radius: 8px;
+        padding: 6px 11px; background: var(--surface);
+        color: var(--fg); font-size: 11.5px;
+        box-shadow: 0 10px 24px -12px rgb(0 0 0 / .5);
+      }
+      .toast[hidden] { display: none; }
+      .toast[data-level="error"] { color: var(--danger); }
+
+      @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="head">
+        <div class="head-row">
+          <span class="dot" id="dot"></span>
+          <span class="head-title">小米笔记</span>
+          <span class="head-status" id="headStatus">加载中…</span>
+          <button class="icon-btn" id="btnSync" title="立即同步" disabled>同步</button>
+          <button class="icon-btn" id="btnOpenPanel" title="打开完整面板">面板</button>
+        </div>
+      </div>
+      <div class="search-wrap">
+        <input class="search" id="search" type="search" placeholder="搜索笔记…" disabled />
+      </div>
+      <div class="scroll" id="list"></div>
+
+      <div class="reader" id="reader" hidden>
+        <div class="reader-bar">
+          <button class="icon-btn back" id="btnBack">← 返回</button>
+          <span class="title" id="readerTitle"></span>
+          <button class="icon-btn" id="btnCopy" title="复制全文到剪贴板">复制全文</button>
+          <button class="icon-btn" id="btnOpenMain" title="在主面板中打开这篇">主面板打开</button>
+        </div>
+        <div class="reader-scroll" id="readerScroll">
+          <div class="reader-meta" id="readerMeta"></div>
+          <div class="md" id="readerBody"></div>
+        </div>
+      </div>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        const applyAppearance = (appearance) => {
+          const base = appearance && appearance.base;
+          document.documentElement.dataset.base =
+            base === "light" || base === "dark"
+              ? base
+              : window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        };
+        if (window.pluginBridge && window.pluginBridge.on) {
+          window.pluginBridge.on("appearance:changed", applyAppearance);
+        }
+        if (window.pluginBridge && window.pluginBridge.invoke) {
+          window.pluginBridge.invoke("app.getAppearance").then(applyAppearance).catch(() => applyAppearance(null));
+        } else {
+          applyAppearance(null);
+        }
+
+        const $ = (id) => document.getElementById(id);
+        const invoke = async (channel, payload) => {
+          if (!window.pluginBridge || !window.pluginBridge.invoke) {
+            return { ok: false, error: "视图桥接不可用" };
+          }
+          try {
+            const result = await window.pluginBridge.invoke(channel, payload || {});
+            return result === undefined || result === null ? { ok: true } : result;
+          } catch (error) {
+            return { ok: false, error: error && error.message ? error.message : String(error) };
+          }
+        };
+
+        let toastTimer = null;
+        const toast = (message, level) => {
+          const el = $("toast");
+          el.textContent = message;
+          el.dataset.level = level || "info";
+          el.hidden = false;
+          if (toastTimer) clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => { el.hidden = true; }, level === "error" ? 5000 : 2600);
+        };
+
+        const formatTime = (ts) => {
+          const n = Number(ts);
+          if (!n) return "";
+          const d = new Date(n);
+          const pad = (x) => String(x).padStart(2, "0");
+          const now = new Date();
+          if (d.toDateString() === now.toDateString()) return `今天 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          if (d.getFullYear() === now.getFullYear()) return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        };
+
+        const state = {
+          loggedIn: false,
+          notes: [],
+          query: "",
+          opened: null,
+          openedTitle: "",
+          openedMarkdown: "",
+        };
+
+        const setStatus = (text, kind) => {
+          $("headStatus").textContent = text;
+          $("dot").dataset.state = kind || "ok";
+        };
+
+        // ── 列表 ────────────────────────────────────────────────────────────
+        const renderList = () => {
+          const box = $("list");
+          box.textContent = "";
+          if (!state.notes.length) {
+            const empty = document.createElement("div");
+            empty.className = "empty";
+            if (!state.loggedIn) {
+              empty.textContent = "还没有登录。点上方「面板」打开完整面板扫码登录。";
+            } else if (state.query) {
+              empty.textContent = "没有匹配的笔记。";
+            } else {
+              empty.textContent = "还没有笔记。点上方「面板」新建一篇，或在手机上记一条后同步。";
+            }
+            box.appendChild(empty);
+            return;
+          }
+
+          for (const note of state.notes) {
+            const row = document.createElement("div");
+            row.className = "row";
+            row.dataset.open = String(note.id === state.opened);
+
+            const main = document.createElement("button");
+            main.className = "row-main";
+            main.style.cssText = "border:0;background:transparent;padding:0;text-align:left;min-width:0;display:flex;flex-direction:column;gap:1px";
+            const title = document.createElement("span");
+            title.className = "row-title";
+            title.textContent = note.title || "无标题笔记";
+            title.title = note.title || "无标题笔记";
+            const meta = document.createElement("span");
+            meta.className = "row-meta";
+            const time = document.createElement("span");
+            time.textContent = formatTime(note.modifyDate);
+            meta.appendChild(time);
+            if (note.folderName) {
+              const folder = document.createElement("span");
+              folder.className = "folder";
+              folder.textContent = `· ${note.folderName}`;
+              meta.appendChild(folder);
+            }
+            main.append(title, meta);
+            main.addEventListener("click", () => void openReader(note.id));
+
+            const openMain = document.createElement("button");
+            openMain.className = "row-open";
+            openMain.textContent = "打开";
+            openMain.title = "在完整面板中打开并定位";
+            openMain.addEventListener("click", (event) => {
+              event.stopPropagation();
+              void openInMainPanel(note.id);
+            });
+
+            row.append(main, openMain);
+            box.appendChild(row);
+          }
+        };
+
+        const loadNotes = async () => {
+          if (!state.loggedIn) return;
+          const res = await invoke("mn.notes.list", { query: state.query, limit: 200 });
+          if (!res.ok) {
+            setStatus(res.error || "读取失败", "warn");
+            return;
+          }
+          state.notes = res.items || [];
+          renderList();
+        };
+
+        const refreshStatus = async () => {
+          const res = await invoke("mn.status");
+          const s = res.status;
+          if (!s) return;
+          state.loggedIn = s.loggedIn === true;
+          $("search").disabled = !state.loggedIn;
+          $("btnSync").disabled = !state.loggedIn;
+          if (!state.loggedIn) setStatus("未登录", "warn");
+          else if (s.syncing) setStatus("同步中…", "busy");
+          else if (s.needLogin) setStatus("登录已失效", "warn");
+          else if (s.lastSyncError) setStatus("同步失败", "warn");
+          else setStatus(`${s.noteCount} 篇 · ${s.lastSyncAt ? formatTime(s.lastSyncAt) : "未同步"}`, "ok");
+        };
+
+        // ── 阅读 ────────────────────────────────────────────────────────────
+        const openReader = async (noteId) => {
+          const res = await invoke("mn.note.get", { id: noteId });
+          if (!res.ok || !res.note) {
+            toast(res.error || "读取笔记失败", "error");
+            return;
+          }
+          state.opened = res.note.id;
+          state.openedTitle = res.note.title || "无标题笔记";
+          state.openedMarkdown = res.note.markdown || "";
+          $("readerTitle").textContent = state.openedTitle;
+          $("readerTitle").title = state.openedTitle;
+          const meta = $("readerMeta");
+          meta.textContent = "";
+          const bits = [];
+          if (res.note.folderName) bits.push(res.note.folderName);
+          bits.push(`修改于 ${formatTime(res.note.modifyDate)}`);
+          for (const bit of bits) {
+            const span = document.createElement("span");
+            span.textContent = bit;
+            meta.appendChild(span);
+          }
+          const body = $("readerBody");
+          body.innerHTML = renderMarkdown(state.openedMarkdown);
+          if (!state.openedMarkdown.trim()) {
+            body.innerHTML = '<p style="color:var(--faint)">这篇笔记还没有正文。</p>';
+          }
+          $("reader").hidden = false;
+          $("readerScroll").scrollTop = 0;
+          renderList();
+        };
+
+        const closeReader = () => {
+          $("reader").hidden = true;
+          state.opened = null;
+          renderList();
+        };
+
+        $("btnBack").addEventListener("click", closeReader);
+
+        // 复制全文：走插件进程的剪贴板通道（视图是 file:// 沙箱页，
+        // navigator.clipboard 在那种上下文里不可靠，宿主代为写入更稳）
+        $("btnCopy").addEventListener("click", async () => {
+          if (state.opened === null) return;
+          const text = state.openedMarkdown || "";
+          if (!text.trim()) {
+            toast("这篇笔记没有正文可复制", "error");
+            return;
+          }
+          const result = await invoke("mn.clipboard.write", { text });
+          if (!result.ok) {
+            toast(result.error || "复制失败", "error");
+            return;
+          }
+          toast(`已复制全文（${text.length} 字）`);
+        });
+
+        // 在主面板打开并定位到这一篇
+        const openInMainPanel = async (noteId) => {
+          await invoke("mn.focus.set", { id: noteId });
+          await invoke("ui.openPanel", { title: "小米笔记" });
+        };
+        $("btnOpenMain").addEventListener("click", () => {
+          if (state.opened !== null) void openInMainPanel(state.opened);
+        });
+
+        // ── 顶栏动作 ────────────────────────────────────────────────────────
+        $("btnOpenPanel").addEventListener("click", async () => {
+          await invoke("ui.openPanel", { title: "小米笔记" });
+        });
+
+        $("btnSync").addEventListener("click", async () => {
+          setStatus("同步中…", "busy");
+          const res = await invoke("mn.sync.start", { full: false });
+          if (!res.ok) {
+            toast(res.error || "同步失败", "error");
+            await refreshStatus();
+            return;
+          }
+          const jobId = res.jobId;
+          const poll = setInterval(async () => {
+            const jobRes = await invoke("mn.job.get", { jobId });
+            const job = jobRes.job;
+            if (!job) { clearInterval(poll); return; }
+            if (job.status === "running") return;
+            clearInterval(poll);
+            await refreshStatus();
+            await loadNotes();
+            toast(job.status === "done" ? "同步完成" : (job.error || "同步失败"),
+              job.status === "done" ? "info" : "error");
+          }, 900);
+        });
+
+        let searchTimer = null;
+        $("search").addEventListener("input", (event) => {
+          const value = event.target.value;
+          if (searchTimer) clearTimeout(searchTimer);
+          searchTimer = setTimeout(async () => {
+            state.query = value.trim();
+            await loadNotes();
+          }, 250);
+        });
+
+        // ── 启动 ────────────────────────────────────────────────────────────
+        (async () => {
+          await refreshStatus();
+          await loadNotes();
+          // 视图不常驻，低频刷新即可
+          setInterval(async () => {
+            await refreshStatus();
+          }, 30000);
+        })();
+
+        // 视图被宿主打开时可能带一个待定位目标（例如从别处跳转过来）
+        // 这里只负责读取并展示，主面板打开时由面板消费同一个待定位目标。
+
+        function renderMarkdown(source) {
+          const escape = (text) =>
+            String(text)
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;")
+              .replace(/'/g, "&#39;");
+          // 链接目标会填进 href="..."，所以只放行安全协议，且引号已在上面转义。
+          const safeHref = (target) =>
+            /^(https?:|mailto:|mi-note:)/i.test(target) ? target : null;
+          const inline = (text) =>
+            escape(text)
+              .replace(/`([^`]+)`/g, "<code>$1</code>")
+              .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+              .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+              .replace(/~~([^~]+)~~/g, "<del>$1</del>")
+              .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, target) => {
+                const decoded = target.replace(/&amp;/g, "&");
+                if (!safeHref(decoded)) return whole;
+                return `<a href="${target}" target="_blank" rel="noreferrer">${label}</a>`;
+              });
+
+          const lines = String(source || "").split("\n");
+          const out = [];
+          let inCode = false;
+          let codeLines = [];
+          let listType = null;
+          const closeList = () => {
+            if (listType) { out.push(`</${listType}>`); listType = null; }
+          };
+
+          for (const line of lines) {
+            if (/^```/.test(line)) {
+              if (inCode) {
+                out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
+                codeLines = [];
+                inCode = false;
+              } else {
+                closeList();
+                inCode = true;
+              }
+              continue;
+            }
+            if (inCode) { codeLines.push(line); continue; }
+
+            const heading = line.match(/^(#{1,6})\s+(.*)$/);
+            if (heading) {
+              closeList();
+              const level = heading[1].length;
+              out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+              continue;
+            }
+            if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { closeList(); out.push("<hr />"); continue; }
+            const quote = line.match(/^>\s?(.*)$/);
+            if (quote) { closeList(); out.push(`<blockquote>${inline(quote[1])}</blockquote>`); continue; }
+
+            const ul = line.match(/^\s*[-*]\s+(.*)$/);
+            if (ul) {
+              if (listType !== "ul") { closeList(); out.push("<ul>"); listType = "ul"; }
+              const task = ul[1].match(/^\[([xX ])\]\s*(.*)$/);
+              if (task) {
+                out.push(`<li><input type="checkbox" disabled${task[1].toLowerCase() === "x" ? " checked" : ""}> ${inline(task[2])}</li>`);
+              } else {
+                out.push(`<li>${inline(ul[1])}</li>`);
+              }
+              continue;
+            }
+            const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+            if (ol) {
+              if (listType !== "ol") { closeList(); out.push("<ol>"); listType = "ol"; }
+              out.push(`<li>${inline(ol[1])}</li>`);
+              continue;
+            }
+            if (!line.trim()) { closeList(); continue; }
+            closeList();
+            out.push(`<p>${inline(line)}</p>`);
+          }
+          closeList();
+          if (inCode && codeLines.length) out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
+          return out.join("\n");
+        }
+      })();
+    </script>
+  </body>
+</html>

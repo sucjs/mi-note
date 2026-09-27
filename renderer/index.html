@@ -1,0 +1,1317 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="pi-plugin-chrome" content="v3" />
+    <title>小米笔记</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #181818;
+        --surface: #1f1f1f;
+        --surface-2: #242424;
+        --hover: color-mix(in oklab, #ffffff 6%, transparent);
+        --active: color-mix(in oklab, #ffffff 11%, transparent);
+        --fg: #ffffff;
+        --secondary: color-mix(in oklab, #ffffff 72%, transparent);
+        --muted: color-mix(in oklab, #ffffff 50%, transparent);
+        --faint: color-mix(in oklab, #ffffff 34%, transparent);
+        --border: color-mix(in oklab, #ffffff 8%, transparent);
+        --border-strong: color-mix(in oklab, #ffffff 16%, transparent);
+        --accent: #ff6a00;
+        --accent-soft: color-mix(in oklab, var(--accent) 18%, transparent);
+        --danger: #ff6764;
+        --ok: #4ec97a;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      }
+      :root[data-base="light"] {
+        color-scheme: light;
+        --bg: #ffffff;
+        --surface: #f7f7f7;
+        --surface-2: #f0f0f0;
+        --hover: color-mix(in oklab, #1a1c1f 5%, transparent);
+        --active: color-mix(in oklab, #1a1c1f 9%, transparent);
+        --fg: #1a1c1f;
+        --secondary: color-mix(in oklab, #1a1c1f 76%, transparent);
+        --muted: #5d5d5d;
+        --faint: #9a9a9a;
+        --border: color-mix(in oklab, #1a1c1f 7%, transparent);
+        --border-strong: color-mix(in oklab, #1a1c1f 14%, transparent);
+        --accent: #ff6a00;
+        --danger: #d92b26;
+        --ok: #1f9d4e;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      #app { height: 100%; display: flex; flex-direction: column; }
+      button, input, textarea, select { font: inherit; color: inherit; }
+      button { cursor: pointer; }
+      button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+        outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
+        outline-offset: 1px;
+      }
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-thumb {
+        border: 3px solid transparent; border-radius: 8px;
+        background-clip: content-box;
+        background-color: color-mix(in oklab, var(--fg) 18%, transparent);
+      }
+      ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in oklab, var(--fg) 30%, transparent); }
+      ::-webkit-scrollbar-track { background: transparent; }
+
+      /* ── 顶栏 ── */
+      .topbar {
+        position: relative;
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 48px;
+        padding: 0 10px 0 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        -webkit-app-region: drag;
+      }
+      .topbar .brand {
+        display: flex; align-items: center; gap: 8px;
+        font-weight: 600; letter-spacing: -0.01em; white-space: nowrap;
+      }
+      .brand-dot {
+        width: 9px; height: 9px; border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      .topbar > * { -webkit-app-region: no-drag; }
+      .spacer { flex: 1; }
+      .status {
+        display: flex; align-items: center; gap: 6px;
+        max-width: 380px; overflow: hidden;
+        color: var(--muted); font-size: 11.5px; white-space: nowrap;
+      }
+      .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
+      .status[data-state="ok"] .dot { background: var(--ok); }
+      .status[data-state="busy"] .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+      .status[data-state="warn"] .dot { background: var(--danger); }
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+      .btn {
+        border: 1px solid var(--border-strong);
+        border-radius: 7px;
+        padding: 4px 10px;
+        background: transparent;
+        color: var(--secondary);
+        font-size: 12px;
+        transition: background .14s ease, color .14s ease, border-color .14s ease;
+        white-space: nowrap;
+      }
+      .btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+      .btn:disabled { opacity: .4; cursor: default; }
+      .btn.primary {
+        border-color: transparent; background: var(--accent); color: #fff; font-weight: 600;
+      }
+      .btn.primary:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 86%, #000); color: #fff; }
+      .btn.danger { color: var(--danger); }
+      .btn.danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 14%, transparent); color: var(--danger); }
+      .btn.icon { padding: 4px 7px; }
+
+      /* ── 主体三栏 ── */
+      .main { flex: 1; display: flex; min-height: 0; }
+      .pane { display: flex; flex-direction: column; min-height: 0; }
+      .folders {
+        flex: 0 0 208px; border-right: 1px solid var(--border); background: var(--surface);
+      }
+      .list {
+        flex: 0 0 272px; border-right: 1px solid var(--border); background: var(--bg);
+      }
+      .editor { flex: 1; min-width: 0; background: var(--bg); }
+
+      .pane-head {
+        flex: 0 0 auto;
+        display: flex; align-items: center; gap: 6px;
+        padding: 8px 10px 6px;
+        color: var(--muted); font-size: 11px;
+        letter-spacing: .05em; text-transform: uppercase;
+      }
+      .pane-head .spacer { flex: 1; }
+
+      .search-wrap { flex: 0 0 auto; padding: 0 10px 8px; }
+      .search {
+        width: 100%;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        padding: 5px 9px;
+        background: var(--bg);
+        font-size: 12.5px;
+      }
+      .search::placeholder { color: var(--faint); }
+
+      .scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px; }
+
+      .folder-row {
+        display: flex; align-items: center; gap: 7px;
+        width: calc(100% - 12px);
+        margin: 1px 6px;
+        border: 0; border-radius: 7px;
+        padding: 6px 9px;
+        background: transparent;
+        color: var(--secondary); font-size: 12.5px; text-align: left;
+        transition: background .14s ease, color .14s ease;
+      }
+      .folder-row:hover { background: var(--hover); color: var(--fg); }
+      .folder-row[data-selected="true"] {
+        background: var(--accent-soft); color: var(--fg); font-weight: 600;
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+      .folder-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .folder-row .count { flex: 0 0 auto; color: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+      .folder-row[data-selected="true"] .count { color: var(--secondary); }
+
+      .note-item {
+        display: block; width: calc(100% - 12px);
+        margin: 1px 6px;
+        border: 0; border-radius: 8px;
+        padding: 8px 10px;
+        background: transparent;
+        text-align: left;
+        transition: background .14s ease;
+      }
+      .note-item:hover { background: var(--hover); }
+      .note-item[data-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+      .note-item .title {
+        display: block; color: var(--fg); font-size: 13px; font-weight: 500;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .note-item .meta {
+        display: flex; gap: 6px; margin-top: 2px;
+        color: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums;
+      }
+      .note-item .meta .folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .note-item .summary {
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 11.5px; line-height: 1.45;
+      }
+
+      .empty {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 6px; height: 100%; padding: 24px; color: var(--muted); text-align: center;
+      }
+      .empty .big { font-size: 13px; color: var(--secondary); font-weight: 500; }
+      .empty .small { font-size: 11.5px; line-height: 1.6; max-width: 34ch; }
+
+      /* ── 编辑器 ── */
+      .editor-bar {
+        flex: 0 0 auto;
+        display: flex; align-items: center; gap: 8px;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .editor-bar .title-input {
+        flex: 1; min-width: 0;
+        border: 0; background: transparent;
+        font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+      }
+      .editor-bar .title-input::placeholder { color: var(--faint); font-weight: 400; }
+      .editor-bar .saved {
+        flex: 0 0 auto; color: var(--faint); font-size: 11px; white-space: nowrap;
+      }
+      .tabs { display: flex; gap: 2px; }
+      .tab {
+        border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+        padding: 3px 9px; background: transparent;
+        color: var(--muted); font-size: 12px;
+      }
+      .tab:hover { color: var(--fg); }
+      .tab[data-active="true"] { border-bottom-color: var(--accent); color: var(--fg); font-weight: 600; }
+
+      .editor-body { flex: 1; min-height: 0; display: flex; }
+      .md-input {
+        flex: 1; min-width: 0;
+        border: 0; padding: 14px 18px 48px;
+        background: transparent; color: var(--fg);
+        font-family: var(--mono); font-size: 12.5px; line-height: 1.7;
+        resize: none; outline: none;
+      }
+      .md-view {
+        flex: 1; min-width: 0; overflow: auto; padding: 14px 22px 60px;
+      }
+      .md-body { max-width: 78ch; font-size: 13px; line-height: 1.72; word-wrap: break-word; }
+      .md-body > *:first-child { margin-top: 0; }
+      .md-body h1 { font-size: 1.65em; margin: 1.3em 0 .5em; padding-bottom: .25em; border-bottom: 1px solid var(--border); }
+      .md-body h2 { font-size: 1.35em; margin: 1.3em 0 .5em; padding-bottom: .2em; border-bottom: 1px solid var(--border); }
+      .md-body h3 { font-size: 1.15em; margin: 1.2em 0 .45em; }
+      .md-body h4, .md-body h5, .md-body h6 { font-size: 1em; margin: 1.1em 0 .4em; }
+      .md-body p { margin: .7em 0; }
+      .md-body ul, .md-body ol { margin: .6em 0; padding-left: 1.6em; }
+      .md-body li { margin: .2em 0; }
+      .md-body code {
+        border-radius: 4px; padding: .1em .35em;
+        background: color-mix(in oklab, var(--fg) 9%, transparent);
+        font-family: var(--mono); font-size: .88em;
+      }
+      .md-body pre {
+        margin: .8em 0; overflow: auto;
+        border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+        background: color-mix(in oklab, var(--fg) 4%, transparent);
+      }
+      .md-body pre code { background: transparent; padding: 0; }
+      .md-body blockquote {
+        margin: .8em 0; padding: .1em 0 .1em 1em;
+        border-left: 3px solid color-mix(in oklab, var(--fg) 20%, transparent);
+        color: var(--secondary);
+      }
+      .md-body hr { height: 1px; margin: 1.5em 0; border: 0; background: var(--border-strong); }
+      .md-body a { color: var(--accent); }
+      .md-body img { max-width: 100%; border-radius: 6px; }
+      .md-body table { border-collapse: collapse; margin: .8em 0; font-size: .95em; }
+      .md-body th, .md-body td { border: 1px solid var(--border-strong); padding: 4px 10px; }
+      .md-body th { background: color-mix(in oklab, var(--fg) 5%, transparent); }
+
+      /* ── 登录遮罩 ── */
+      .overlay {
+        position: fixed; inset: 0; z-index: 40;
+        display: flex; align-items: center; justify-content: center;
+        padding: calc(var(--pi-plugin-titlebar-height, 0px) + 12px) 16px 16px;
+        background: color-mix(in oklab, var(--bg) 88%, transparent);
+        backdrop-filter: blur(6px);
+      }
+      .overlay[hidden] { display: none; }
+      .login-card {
+        width: 372px; max-width: 100%;
+        border: 1px solid var(--border-strong); border-radius: 14px;
+        padding: 22px; background: var(--surface); text-align: center;
+        box-shadow: 0 24px 60px -20px rgb(0 0 0 / .5);
+      }
+      .login-card h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+      .login-card .sub { margin: 0 0 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+      .qr-box {
+        position: relative;
+        width: 220px; height: 220px; margin: 0 auto 14px;
+        border: 1px solid var(--border); border-radius: 12px;
+        background: #fff; padding: 10px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .qr-box img { width: 100%; height: 100%; object-fit: contain; display: block; }
+      .qr-box .qr-state {
+        position: absolute; inset: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 8px; border-radius: 12px;
+        background: color-mix(in oklab, #fff 92%, transparent);
+        color: #333; font-size: 12.5px;
+      }
+      .qr-box .qr-state[hidden] { display: none; }
+      .spin {
+        width: 18px; height: 18px; border-radius: 50%;
+        border: 2px solid color-mix(in oklab, var(--accent) 30%, transparent);
+        border-top-color: var(--accent);
+        animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .login-steps { margin: 0 0 14px; padding: 0; list-style: none; text-align: left; }
+      .login-steps li {
+        display: flex; gap: 8px; padding: 4px 0;
+        color: var(--secondary); font-size: 12px; line-height: 1.55;
+      }
+      .login-steps .num {
+        flex: 0 0 auto; width: 17px; height: 17px; border-radius: 50%;
+        background: var(--accent-soft); color: var(--accent);
+        font-size: 10.5px; font-weight: 700; text-align: center; line-height: 17px;
+      }
+      .login-foot { display: flex; gap: 8px; justify-content: center; align-items: center; }
+      .login-hint { margin-top: 10px; color: var(--faint); font-size: 11px; min-height: 16px; }
+      .login-hint[data-state="error"] { color: var(--danger); }
+
+      /* ── 通用输入对话框（Electron 不支持 window.prompt） ── */
+      .input-dialog {
+        position: fixed; inset: 0; z-index: 50;
+        display: flex; align-items: center; justify-content: center;
+        padding: calc(var(--pi-plugin-titlebar-height, 0px) + 12px) 16px 16px;
+        background: color-mix(in oklab, var(--bg) 84%, transparent);
+        backdrop-filter: blur(4px);
+      }
+      .input-dialog[hidden] { display: none; }
+      .input-dialog .box {
+        width: 340px; max-width: 100%;
+        border: 1px solid var(--border-strong); border-radius: 12px;
+        padding: 16px; background: var(--surface);
+        box-shadow: 0 22px 55px -20px rgb(0 0 0 / .5);
+      }
+      .input-dialog .box h3 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; }
+      .input-dialog .box input {
+        width: 100%;
+        border: 1px solid var(--border-strong); border-radius: 8px;
+        padding: 6px 10px; background: var(--bg); font-size: 13px;
+      }
+      .input-dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
+      /* ── 问答抽屉 ── */
+      .ask-panel {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        max-height: 52%;
+        display: flex; flex-direction: column;
+      }
+      .ask-panel[hidden] { display: none; }
+      .ask-head {
+        display: flex; align-items: center; gap: 8px;
+        padding: 7px 12px; border-bottom: 1px solid var(--border);
+      }
+      .ask-head .label { font-size: 12px; font-weight: 600; }
+      .ask-head select {
+        border: 1px solid var(--border-strong); border-radius: 6px;
+        padding: 2px 6px; background: var(--bg); color: var(--fg); font-size: 11.5px;
+        max-width: 260px;
+      }
+      .ask-log { flex: 1; min-height: 60px; overflow: auto; padding: 10px 12px; }
+      .ask-msg { margin-bottom: 10px; font-size: 12.5px; line-height: 1.6; }
+      .ask-msg .who { color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
+      .ask-msg .body { margin-top: 2px; white-space: pre-wrap; word-wrap: break-word; }
+      .ask-msg[data-role="user"] .body { color: var(--secondary); }
+      .ask-msg .sources { margin-top: 5px; color: var(--faint); font-size: 11px; }
+      .ask-form { display: flex; gap: 8px; padding: 8px 12px 10px; }
+      .ask-form textarea {
+        flex: 1; min-height: 34px; max-height: 110px;
+        border: 1px solid var(--border-strong); border-radius: 8px;
+        padding: 6px 9px; background: var(--bg); font-size: 12.5px; resize: none;
+      }
+
+      .toast {
+        position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+        z-index: 60; max-width: 70vw;
+        border: 1px solid var(--border-strong); border-radius: 10px;
+        padding: 8px 14px; background: var(--surface-2);
+        color: var(--fg); font-size: 12.5px;
+        box-shadow: 0 12px 30px -12px rgb(0 0 0 / .55);
+      }
+      .toast[hidden] { display: none; }
+      .toast[data-level="error"] { border-color: color-mix(in oklab, var(--danger) 45%, transparent); color: var(--danger); }
+
+      @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <span class="brand"><span class="brand-dot"></span>小米笔记</span>
+        <div class="status" id="status" data-state="busy">
+          <span class="dot"></span><span id="statusText">正在检查登录状态…</span>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn" id="btnAsk" disabled>AI 问答</button>
+        <button class="btn" id="btnSync" disabled>同步</button>
+        <button class="btn primary" id="btnNew" disabled>新建</button>
+      </header>
+
+      <div class="main" id="main">
+        <!-- 文件夹 -->
+        <section class="pane folders">
+          <div class="pane-head">
+            <span>文件夹</span>
+            <span class="spacer"></span>
+            <button class="btn icon" id="btnNewFolder" title="新建文件夹" disabled>＋</button>
+          </div>
+          <div class="scroll" id="folderList"></div>
+        </section>
+
+        <!-- 列表 -->
+        <section class="pane list">
+          <div class="pane-head">
+            <span id="listScope">全部笔记</span>
+            <span class="spacer"></span>
+            <span id="listCount" style="text-transform:none; letter-spacing:0"></span>
+          </div>
+          <div class="search-wrap">
+            <input class="search" id="search" type="search" placeholder="搜索标题与正文…" disabled />
+          </div>
+          <div class="scroll" id="noteList"></div>
+        </section>
+
+        <!-- 正文 -->
+        <section class="pane editor">
+          <div class="editor-bar">
+            <input class="title-input" id="titleInput" placeholder="无标题笔记" disabled />
+            <span class="saved" id="savedHint"></span>
+            <div class="tabs" id="tabs" hidden>
+              <button class="tab" data-mode="edit" data-active="true">编辑</button>
+              <button class="tab" data-mode="preview">预览</button>
+            </div>
+            <button class="btn" id="btnSave" disabled>保存</button>
+            <button class="btn danger" id="btnDelete" title="删除这篇笔记" disabled>删除</button>
+          </div>
+          <div class="editor-body" id="editorBody">
+            <div class="empty" id="editorEmpty">
+              <div class="big">选择一篇笔记</div>
+              <div class="small">从左侧列表点开一篇即可阅读与编辑。也可以直接点右上角「新建」写一篇新的。</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 问答 -->
+      <section class="ask-panel" id="askPanel" hidden>
+        <div class="ask-head">
+          <span class="label">基于我的笔记提问</span>
+          <select id="askModel"></select>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn icon" id="btnAskClose" title="收起">收起</button>
+        </div>
+        <div class="ask-log" id="askLog"></div>
+        <div class="ask-form">
+          <textarea id="askInput" rows="1" placeholder="例如：我上次记录的会议时间都定了哪些？"></textarea>
+          <button class="btn primary" id="btnAskSend">提问</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- 输入对话框（Electron 窗口不支持 window.prompt，所以自带一个） -->
+    <div class="input-dialog" id="inputDialog" hidden>
+      <div class="box">
+        <h3 id="inputDialogTitle">输入</h3>
+        <input id="inputDialogField" type="text" />
+        <div class="actions">
+          <button class="btn" id="inputDialogCancel">取消</button>
+          <button class="btn primary" id="inputDialogOk">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 登录 -->
+    <div class="overlay" id="loginOverlay" hidden>
+      <div class="login-card">
+        <h2>扫码登录小米账号</h2>
+        <p class="sub">用小米手机「设置 → 小米账号 → 扫一扫」扫描并确认即可，不需要输入密码。</p>
+        <div class="qr-box">
+          <img id="qrImage" alt="登录二维码" />
+          <div class="qr-state" id="qrState">
+            <div class="spin"></div>
+            <span id="qrStateText">正在获取二维码…</span>
+          </div>
+        </div>
+        <ol class="login-steps">
+          <li><span class="num">1</span><span>在小米手机上打开「设置」→「小米账号」</span></li>
+          <li><span class="num">2</span><span>点右上角「扫一扫」，扫描上方二维码</span></li>
+          <li><span class="num">3</span><span>在手机上点确认，面板会自动完成登录与首次同步</span></li>
+        </ol>
+        <div class="login-foot">
+          <button class="btn primary" id="btnQrRefresh">重新获取</button>
+          <button class="btn" id="btnQrCancel">稍后再说</button>
+        </div>
+        <div class="login-hint" id="loginHint"></div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        // ── 主题 ────────────────────────────────────────────────────────────
+        const applyAppearance = (appearance) => {
+          const base = appearance && appearance.base;
+          document.documentElement.dataset.base =
+            base === "light" || base === "dark"
+              ? base
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+        };
+        if (window.pluginBridge && window.pluginBridge.on) {
+          window.pluginBridge.on("appearance:changed", applyAppearance);
+        }
+        if (window.pluginBridge && window.pluginBridge.invoke) {
+          window.pluginBridge
+            .invoke("app.getAppearance")
+            .then(applyAppearance)
+            .catch(() => applyAppearance(null));
+        } else {
+          applyAppearance(null);
+        }
+
+        // ── 基础设施 ────────────────────────────────────────────────────────
+        const $ = (id) => document.getElementById(id);
+        const invoke = async (channel, payload) => {
+          if (!window.pluginBridge || !window.pluginBridge.invoke) {
+            return { ok: false, error: "面板桥接不可用（需要在 PI-Desktop 中打开）" };
+          }
+          try {
+            const result = await window.pluginBridge.invoke(channel, payload || {});
+            return result === undefined || result === null ? { ok: true } : result;
+          } catch (error) {
+            return { ok: false, error: error && error.message ? error.message : String(error) };
+          }
+        };
+
+        let toastTimer = null;
+        const toast = (message, level) => {
+          const el = $("toast");
+          el.textContent = message;
+          el.dataset.level = level || "info";
+          el.hidden = false;
+          if (toastTimer) clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => { el.hidden = true; }, level === "error" ? 6000 : 3200);
+        };
+
+        // Electron 的窗口不实现 window.prompt（调用会直接返回 null），
+        // 所以自备一个输入对话框。返回用户输入，取消返回 null。
+        const askText = (title, initial) =>
+          new Promise((resolve) => {
+            const dialog = $("inputDialog");
+            const field = $("inputDialogField");
+            const ok = $("inputDialogOk");
+            const cancel = $("inputDialogCancel");
+            $("inputDialogTitle").textContent = title;
+            field.value = initial || "";
+            dialog.hidden = false;
+            field.focus();
+            field.select();
+
+            const cleanup = () => {
+              dialog.hidden = true;
+              ok.removeEventListener("click", onOk);
+              cancel.removeEventListener("click", onCancel);
+              field.removeEventListener("keydown", onKey);
+            };
+            const finish = (value) => {
+              cleanup();
+              resolve(value);
+            };
+            const onOk = () => finish(field.value);
+            const onCancel = () => finish(null);
+            const onKey = (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                finish(field.value);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                finish(null);
+              }
+            };
+            ok.addEventListener("click", onOk);
+            cancel.addEventListener("click", onCancel);
+            field.addEventListener("keydown", onKey);
+          });
+
+        const formatTime = (ts) => {
+          const n = Number(ts);
+          if (!n) return "";
+          const d = new Date(n);
+          const pad = (x) => String(x).padStart(2, "0");
+          const now = new Date();
+          const sameDay = d.toDateString() === now.toDateString();
+          if (sameDay) return `今天 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          if (d.getFullYear() === now.getFullYear()) return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        };
+
+        // ── 状态 ────────────────────────────────────────────────────────────
+        const state = {
+          loggedIn: false,
+          folderId: "0",
+          folders: [],
+          notes: [],
+          total: 0,
+          query: "",
+          selectedId: null,
+          draft: { id: null, title: "", markdown: "", dirty: false },
+          mode: "preview",
+          loginJobId: null,
+          loginExpiresAt: 0,
+          loginTimer: null,
+          jobs: new Set(),
+          askModel: "",
+          askBusy: false,
+        };
+
+        // ── 状态栏 ──────────────────────────────────────────────────────────
+        const setStatus = (text, kind) => {
+          $("statusText").textContent = text;
+          $("status").dataset.state = kind || "ok";
+        };
+
+        const refreshStatus = async (status) => {
+          const s = status || (await invoke("mn.status")).status;
+          if (!s) return;
+          state.loggedIn = s.loggedIn === true;
+          if (!state.loggedIn) {
+            setStatus("尚未登录", "warn");
+          } else if (s.syncing) {
+            setStatus("正在同步…", "busy");
+          } else if (s.needLogin) {
+            setStatus("登录已失效，请重新扫码", "warn");
+          } else if (s.lastSyncError) {
+            setStatus(`同步失败：${s.lastSyncError}`, "warn");
+          } else {
+            const when = s.lastSyncAt ? formatTime(s.lastSyncAt) : "尚未同步";
+            setStatus(`${s.noteCount} 篇笔记 · ${when}`, "ok");
+          }
+          setEnabled(state.loggedIn);
+        };
+
+        const setEnabled = (on) => {
+          for (const id of ["btnNew", "btnSync", "search", "btnNewFolder"]) {
+            const el = $(id);
+            if (el) el.disabled = !on;
+          }
+          $("btnAsk").disabled = !on;
+        };
+
+        // ── 登录 ────────────────────────────────────────────────────────────
+        const showLogin = () => { $("loginOverlay").hidden = false; };
+        const hideLogin = () => {
+          $("loginOverlay").hidden = true;
+          if (state.loginTimer) { clearInterval(state.loginTimer); state.loginTimer = null; }
+          state.loginJobId = null;
+        };
+
+        const setQrState = (text, spinner, isError) => {
+          const box = $("qrState");
+          box.hidden = !text;
+          $("qrStateText").textContent = text || "";
+          const sp = box.querySelector(".spin");
+          if (sp) sp.hidden = !spinner;
+          $("loginHint").textContent = "";
+          $("loginHint").dataset.state = isError ? "error" : "";
+        };
+
+        const setLoginHint = (text, isError) => {
+          $("loginHint").textContent = text || "";
+          $("loginHint").dataset.state = isError ? "error" : "";
+        };
+
+        const startLogin = async () => {
+          hideLogin();
+          showLogin();
+          setQrState("正在获取二维码…", true);
+          $("qrImage").removeAttribute("src");
+          setLoginHint("");
+          const res = await invoke("mn.login.start");
+          if (!res.ok) {
+            setQrState("获取失败", false);
+            setLoginHint(res.error || "无法获取二维码，请点「重新获取」", true);
+            return;
+          }
+          $("qrImage").src = res.qrDataUri;
+          setQrState("", false);
+          state.loginJobId = res.jobId;
+          state.loginExpiresAt = Number(res.expiresAt) || 0;
+          const seconds = Number(res.expiresInSeconds) || 0;
+          setLoginHint(`二维码 ${Math.max(1, Math.round(seconds / 60))} 分钟内有效。用小米手机「设置 → 小米账号 → 扫一扫」。`);
+          watchLogin();
+        };
+
+        // 轮询扫码结果。二维码有效期内一直等；过期就提示重新获取。
+        const watchLogin = () => {
+          if (state.loginTimer) clearInterval(state.loginTimer);
+          const jobId = state.loginJobId;
+          if (!jobId) return;
+          state.loginTimer = setInterval(async () => {
+            const res = await invoke("mn.job.get", { jobId });
+            const job = res.job;
+            if (!job) return;
+            if (job.status === "running") {
+              const phase = job.progress && job.progress.phase;
+              if (phase === "settling") setLoginHint("已确认，正在完成登录…");
+              else if (phase === "syncing") setLoginHint("登录成功，正在首次同步笔记…");
+              else if (Date.now() > state.loginExpiresAt && state.loginExpiresAt) {
+                setQrState("二维码已过期", false);
+                setLoginHint("二维码已过期，请点「重新获取」。", true);
+              }
+              return;
+            }
+            clearInterval(state.loginTimer);
+            state.loginTimer = null;
+            if (job.status === "done") {
+              setLoginHint("登录成功，正在加载笔记…");
+              hideLogin();
+              await refreshStatus();
+              await loadFolders();
+              await loadNotes();
+              // 侧边栏可能在这之前请求过「在主面板打开某篇」
+              await consumeFocus();
+              toast("已登录小米账号");
+            } else {
+              const message = job.error || "登录失败";
+              setQrState(/过期|取消/.test(message) ? "二维码已失效" : "登录失败", false);
+              setLoginHint(message, true);
+            }
+          }, 1200);
+        };
+
+        $("btnQrRefresh").addEventListener("click", () => void startLogin());
+        $("btnQrCancel").addEventListener("click", async () => {
+          hideLogin();
+          await invoke("mn.login.cancel");
+          if (!state.loggedIn) setStatus("尚未登录", "warn");
+        });
+
+        // ── 文件夹 ──────────────────────────────────────────────────────────
+        const renderFolders = () => {
+          const box = $("folderList");
+          box.textContent = "";
+          const root = document.createElement("button");
+          root.className = "folder-row";
+          root.dataset.selected = String(state.folderId === "0");
+          root.innerHTML = '<span class="name"></span><span class="count"></span>';
+          root.querySelector(".name").textContent = "全部笔记";
+          const rootCount = state.folders.reduce((sum, f) => sum + f.count, 0);
+          root.querySelector(".count").textContent = String(rootCount);
+          root.addEventListener("click", () => selectFolder("0"));
+          box.appendChild(root);
+
+          for (const folder of state.folders) {
+            const row = document.createElement("button");
+            row.className = "folder-row";
+            row.dataset.selected = String(state.folderId === folder.id);
+            row.innerHTML = '<span class="name"></span><span class="count"></span>';
+            row.querySelector(".name").textContent = folder.name;
+            row.querySelector(".count").textContent = String(folder.count);
+            row.title = folder.name;
+            row.addEventListener("click", () => selectFolder(folder.id));
+            box.appendChild(row);
+          }
+        };
+
+        const loadFolders = async () => {
+          const res = await invoke("mn.folders.list");
+          if (!res.ok) return;
+          state.folders = Array.isArray(res.folders) ? res.folders : [];
+          renderFolders();
+        };
+
+        const selectFolder = async (folderId) => {
+          state.folderId = folderId;
+          renderFolders();
+          const folder = state.folders.find((f) => f.id === folderId);
+          $("listScope").textContent = folder ? folder.name : "全部笔记";
+          await loadNotes();
+        };
+
+        // ── 列表 ────────────────────────────────────────────────────────────
+        const renderNotes = () => {
+          const box = $("noteList");
+          box.textContent = "";
+          $("listCount").textContent = state.total ? `${state.total}` : "";
+
+          if (!state.notes.length) {
+            const empty = document.createElement("div");
+            empty.className = "empty";
+            const big = document.createElement("div");
+            big.className = "big";
+            big.textContent = state.query ? "没有匹配的笔记" : "这里还没有笔记";
+            const small = document.createElement("div");
+            small.className = "small";
+            small.textContent = state.query
+              ? "换个关键词试试，或清空搜索框。"
+              : "点右上角「新建」写一篇，或在手机上记一条后点「同步」。";
+            empty.append(big, small);
+            box.appendChild(empty);
+            return;
+          }
+
+          for (const note of state.notes) {
+            const item = document.createElement("button");
+            item.className = "note-item";
+            item.dataset.selected = String(note.id === state.selectedId);
+
+            const title = document.createElement("span");
+            title.className = "title";
+            title.textContent = note.title || "无标题笔记";
+
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            const time = document.createElement("span");
+            time.textContent = formatTime(note.modifyDate);
+            meta.appendChild(time);
+            if (note.folderName) {
+              const folder = document.createElement("span");
+              folder.className = "folder";
+              folder.textContent = `· ${note.folderName}`;
+              meta.appendChild(folder);
+            }
+
+            const summary = document.createElement("span");
+            summary.className = "summary";
+            summary.textContent = note.summary || "";
+
+            item.append(title, meta);
+            if (note.summary) item.appendChild(summary);
+            item.addEventListener("click", () => openNote(note.id));
+            box.appendChild(item);
+          }
+        };
+
+        const loadNotes = async () => {
+          if (!state.loggedIn) return;
+          const res = await invoke("mn.notes.list", {
+            folderId: state.folderId,
+            query: state.query,
+            limit: 300,
+          });
+          if (!res.ok) {
+            toast(res.error || "读取笔记列表失败", "error");
+            return;
+          }
+          state.notes = res.items || [];
+          state.total = res.total || 0;
+          renderNotes();
+        };
+
+        // 搜索：输入后 250ms 去抖
+        let searchTimer = null;
+        $("search").addEventListener("input", (event) => {
+          const value = event.target.value;
+          if (searchTimer) clearTimeout(searchTimer);
+          searchTimer = setTimeout(async () => {
+            state.query = value.trim();
+            await loadNotes();
+          }, 250);
+        });
+
+        // ── 编辑器 ──────────────────────────────────────────────────────────
+        const setDirty = (dirty) => {
+          state.draft.dirty = dirty;
+          $("savedHint").textContent = dirty ? "未保存" : "";
+          $("btnSave").disabled = !dirty || !state.selectedId;
+        };
+
+        const renderEditor = () => {
+          const body = $("editorBody");
+          body.textContent = "";
+          const note = state.draft;
+
+          if (note.id === null) {
+            const empty = document.createElement("div");
+            empty.className = "empty";
+            empty.innerHTML = '<div class="big">选择一篇笔记</div><div class="small">从左侧列表点开一篇即可阅读与编辑。也可以直接点右上角「新建」写一篇新的。</div>';
+            body.appendChild(empty);
+            $("tabs").hidden = true;
+            $("titleInput").disabled = true;
+            $("btnDelete").disabled = true;
+            $("btnSave").disabled = true;
+            return;
+          }
+
+          $("tabs").hidden = false;
+          $("titleInput").disabled = false;
+          $("btnDelete").disabled = false;
+
+          if (state.mode === "edit") {
+            const textarea = document.createElement("textarea");
+            textarea.className = "md-input";
+            textarea.spellcheck = false;
+            textarea.value = note.markdown;
+            textarea.placeholder = "用 Markdown 记点什么…";
+            textarea.addEventListener("input", () => {
+              note.markdown = textarea.value;
+              setDirty(true);
+            });
+            body.appendChild(textarea);
+          } else {
+            const view = document.createElement("div");
+            view.className = "md-view";
+            const md = document.createElement("div");
+            md.className = "md-body";
+            md.innerHTML = renderMarkdown(note.markdown);
+            if (!note.markdown.trim()) {
+              md.innerHTML = '<p style="color:var(--faint)">这篇笔记还没有正文。切到「编辑」写点内容。</p>';
+            }
+            view.appendChild(md);
+            body.appendChild(view);
+          }
+        };
+
+        for (const tab of document.querySelectorAll(".tab")) {
+          tab.addEventListener("click", () => {
+            state.mode = tab.dataset.mode;
+            for (const other of document.querySelectorAll(".tab")) {
+              other.dataset.active = String(other === tab);
+            }
+            renderEditor();
+          });
+        }
+
+        const openNote = async (noteId) => {
+          if (state.draft.dirty && !confirm("当前笔记有未保存的修改，切换会丢弃它们。继续吗？")) return;
+          state.selectedId = noteId;
+          renderNotes();
+          const res = await invoke("mn.note.get", { id: noteId });
+          if (!res.ok || !res.note) {
+            toast(res.error || "读取笔记失败", "error");
+            return;
+          }
+          state.draft = {
+            id: res.note.id,
+            title: res.note.title || "",
+            markdown: res.note.markdown || "",
+            folderId: res.note.folderId,
+            dirty: false,
+          };
+          $("titleInput").value = state.draft.title;
+          $("savedHint").textContent = "";
+          $("btnSave").disabled = true;
+          renderEditor();
+        };
+
+        $("titleInput").addEventListener("input", (event) => {
+          if (state.draft.id === null) return;
+          state.draft.title = event.target.value;
+          setDirty(true);
+        });
+
+        const saveNote = async () => {
+          if (state.draft.id === null || !state.draft.dirty) return;
+          $("btnSave").disabled = true;
+          $("savedHint").textContent = "保存中…";
+          const res = await invoke("mn.note.update", {
+            id: state.draft.id,
+            title: state.draft.title,
+            markdown: state.draft.markdown,
+          });
+          if (!res.ok) {
+            $("savedHint").textContent = "";
+            $("btnSave").disabled = false;
+            toast(res.error || "保存失败", "error");
+            return;
+          }
+          state.draft.dirty = false;
+          $("savedHint").textContent = "已保存";
+          setTimeout(() => {
+            if (!state.draft.dirty) $("savedHint").textContent = "";
+          }, 2200);
+          await loadNotes();
+        };
+        $("btnSave").addEventListener("click", saveNote);
+
+        document.addEventListener("keydown", (event) => {
+          const meta = event.ctrlKey || event.metaKey;
+          if (meta && event.key.toLowerCase() === "s") {
+            event.preventDefault();
+            void saveNote();
+          }
+        });
+
+        $("btnNew").addEventListener("click", async () => {
+          const title = await askText("新笔记的标题（可以留空）", "");
+          if (title === null) return;
+          const res = await invoke("mn.note.create", {
+            title: title.trim(),
+            markdown: "",
+            folderId: state.folderId === "0" ? "0" : state.folderId,
+          });
+          if (!res.ok || !res.note) {
+            toast(res.error || "新建失败", "error");
+            return;
+          }
+          await loadNotes();
+          await openNote(res.note.id);
+          state.mode = "edit";
+          for (const tab of document.querySelectorAll(".tab")) {
+            tab.dataset.active = String(tab.dataset.mode === "edit");
+          }
+          renderEditor();
+        });
+
+        $("btnDelete").addEventListener("click", async () => {
+          if (state.draft.id === null) return;
+          if (!confirm("把这篇笔记移到小米笔记回收站？稍后可以在手机或网页端恢复。")) return;
+          const res = await invoke("mn.note.delete", { id: state.draft.id, purge: false });
+          if (!res.ok) {
+            toast(res.error || "删除失败", "error");
+            return;
+          }
+          state.selectedId = null;
+          state.draft = { id: null, title: "", markdown: "", dirty: false };
+          $("titleInput").value = "";
+          renderEditor();
+          await loadNotes();
+          await loadFolders();
+          toast("已移入回收站");
+        });
+
+        $("btnNewFolder").addEventListener("click", async () => {
+          const name = await askText("新文件夹的名称", "");
+          if (name === null || !name.trim()) return;
+          const res = await invoke("mn.folder.create", { name: name.trim() });
+          if (!res.ok) {
+            toast(res.error || "新建文件夹失败", "error");
+            return;
+          }
+          await loadFolders();
+          toast(`已创建文件夹「${name.trim()}」`);
+        });
+
+        // ── 同步 ────────────────────────────────────────────────────────────
+        const runSync = async (full) => {
+          setStatus("正在同步…", "busy");
+          const res = await invoke("mn.sync.start", { full: full === true });
+          if (!res.ok) {
+            setStatus("同步失败", "warn");
+            toast(res.error || "同步失败", "error");
+            return;
+          }
+          const jobId = res.jobId;
+          const poll = setInterval(async () => {
+            const jobRes = await invoke("mn.job.get", { jobId });
+            const job = jobRes.job;
+            if (!job) { clearInterval(poll); return; }
+            if (job.status === "running") {
+              const p = job.progress || {};
+              if (p.phase === "bodies" && p.total) setStatus(`正在同步正文 ${p.done || 0}/${p.total}…`, "busy");
+              else if (p.phase === "list") setStatus(`正在读取列表（${p.count || 0} 篇）…`, "busy");
+              return;
+            }
+            clearInterval(poll);
+            if (job.status === "done") {
+              await refreshStatus();
+              await loadFolders();
+              await loadNotes();
+              toast(`同步完成：${job.result ? job.result.notes : ""} 篇笔记`);
+            } else {
+              setStatus(`同步失败：${job.error || "未知错误"}`, "warn");
+              toast(job.error || "同步失败", "error");
+            }
+          }, 900);
+        };
+        $("btnSync").addEventListener("click", () => void runSync(false));
+
+        // ── AI 问答 ─────────────────────────────────────────────────────────
+        $("btnAsk").addEventListener("click", async () => {
+          $("askPanel").hidden = false;
+          const res = await invoke("mn.models.list");
+          const select = $("askModel");
+          select.textContent = "";
+          const models = (res.ok && res.models) || [];
+          if (!models.length) {
+            const option = document.createElement("option");
+            option.textContent = "（没有可用模型，请先在 PI-Desktop 登录模型）";
+            option.value = "";
+            select.appendChild(option);
+            return;
+          }
+          for (const model of models) {
+            const option = document.createElement("option");
+            option.value = model.key;
+            option.textContent = model.label + (model.isDefault ? "（默认）" : "");
+            select.appendChild(option);
+          }
+          // 默认选中：先看设置里记住的，再看宿主默认模型
+          const saved = (await invoke("mn.ask.default-model")).modelKey || "";
+          const preferred = models.find((m) => m.key === saved)
+            ?? models.find((m) => m.isDefault)
+            ?? models[0];
+          state.askModel = preferred.key;
+          select.value = state.askModel;
+          $("askInput").focus();
+        });
+        $("btnAskClose").addEventListener("click", () => { $("askPanel").hidden = true; });
+        $("askModel").addEventListener("change", async (event) => {
+          state.askModel = event.target.value;
+          // 记住选择，下次打开面板与 AI 工具都沿用
+          await invoke("mn.ask.set-model", { modelKey: state.askModel });
+        });
+
+        const appendAsk = (role, text, sources) => {
+          const log = $("askLog");
+          const wrap = document.createElement("div");
+          wrap.className = "ask-msg";
+          wrap.dataset.role = role;
+          const who = document.createElement("div");
+          who.className = "who";
+          who.textContent = role === "user" ? "我" : "助手";
+          const body = document.createElement("div");
+          body.className = "body";
+          body.textContent = text;
+          wrap.append(who, body);
+          if (sources && sources.length) {
+            const src = document.createElement("div");
+            src.className = "sources";
+            src.textContent = "参考：" + sources.map((s) => `《${s.title}》`).join("、");
+            wrap.appendChild(src);
+          }
+          log.appendChild(wrap);
+          log.scrollTop = log.scrollHeight;
+          return body;
+        };
+
+        const ask = async () => {
+          if (state.askBusy) return;
+          const input = $("askInput");
+          const question = input.value.trim();
+          if (!question) return;
+          state.askBusy = true;
+          input.value = "";
+          appendAsk("user", question);
+          const body = appendAsk("assistant", "正在翻阅你的笔记…");
+          $("btnAskSend").disabled = true;
+
+          const res = await invoke("mn.ask", { question, modelKey: state.askModel });
+          if (!res.ok) {
+            body.textContent = res.error || "提问失败";
+            state.askBusy = false;
+            $("btnAskSend").disabled = false;
+            return;
+          }
+          const jobId = res.jobId;
+          const poll = setInterval(async () => {
+            const jobRes = await invoke("mn.job.get", { jobId });
+            const job = jobRes.job;
+            if (!job) { clearInterval(poll); state.askBusy = false; $("btnAskSend").disabled = false; return; }
+            if (job.status === "running") return;
+            clearInterval(poll);
+            state.askBusy = false;
+            $("btnAskSend").disabled = false;
+            if (job.status === "done" && job.result) {
+              body.textContent = job.result.answer;
+              if (job.result.usedFallback) {
+                body.textContent += "\n\n（没有找到直接相关的笔记，以上基于最近更新的几篇。）";
+              }
+              if (job.result.sources && job.result.sources.length) {
+                const src = document.createElement("div");
+                src.className = "sources";
+                src.textContent = "参考：" + job.result.sources.map((s) => `《${s.title}》`).join("、");
+                body.parentElement.appendChild(src);
+              }
+            } else {
+              body.textContent = job.error || "回答失败";
+            }
+          }, 900);
+        };
+        $("btnAskSend").addEventListener("click", () => void ask());
+        $("askInput").addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            void ask();
+          }
+        });
+
+        // ── 侧边栏联动：跳转过来时自动定位到指定笔记 ────────────────────────
+        const consumeFocus = async () => {
+          const res = await invoke("mn.focus.consume");
+          if (res.ok && res.focus) {
+            await openNote(res.focus);
+            const folder = state.notes.find((n) => n.id === res.focus);
+            if (folder) selectFolder(folder.folderId);
+          }
+        };
+
+        // ── 启动 ────────────────────────────────────────────────────────────
+        (async () => {
+          const status = (await invoke("mn.status")).status;
+          await refreshStatus(status);
+          if (!state.loggedIn) {
+            showLogin();
+            await startLogin();
+          } else {
+            await loadFolders();
+            await loadNotes();
+            await consumeFocus();
+          }
+          // 面板打开时轻量轮询状态，让「同步中 / 上次同步」保持新鲜
+          setInterval(async () => {
+            if (state.jobs.size) return;
+            const res = await invoke("mn.status");
+            if (res.ok) await refreshStatus(res.status);
+          }, 20000);
+        })();
+
+        // 极简 Markdown 渲染：转义后支持标题、列表、引用、代码块、行内样式与链接
+        function renderMarkdown(source) {
+          // 转义必须连引号一起处理：下面会把链接目标填进 href="..."，
+          // 不转义引号就能用 `"` 逃出属性注入其他属性/事件。
+          const escape = (text) =>
+            String(text)
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;")
+              .replace(/'/g, "&#39;");
+          // 只给安全协议生成链接；其他（javascript:、data: 等）按纯文本显示。
+          const safeHref = (target) =>
+            /^(https?:|mailto:|mi-note:)/i.test(target) ? target : null;
+          const inline = (text) =>
+            escape(text)
+              .replace(/`([^`]+)`/g, "<code>$1</code>")
+              .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+              .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+              .replace(/~~([^~]+)~~/g, "<del>$1</del>")
+              .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, target) => {
+                const decoded = target.replace(/&amp;/g, "&");
+                if (!safeHref(decoded)) return whole;
+                return `<a href="${target}" target="_blank" rel="noreferrer">${label}</a>`;
+              });
+
+          const lines = String(source || "").split("\n");
+          const out = [];
+          let inCode = false;
+          let codeLines = [];
+          let listType = null;
+
+          const closeList = () => {
+            if (listType) { out.push(`</${listType}>`); listType = null; }
+          };
+
+          for (const line of lines) {
+            if (/^```/.test(line)) {
+              if (inCode) {
+                out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
+                codeLines = [];
+                inCode = false;
+              } else {
+                closeList();
+                inCode = true;
+              }
+              continue;
+            }
+            if (inCode) { codeLines.push(line); continue; }
+
+            const heading = line.match(/^(#{1,6})\s+(.*)$/);
+            if (heading) {
+              closeList();
+              const level = heading[1].length;
+              out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+              continue;
+            }
+            if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { closeList(); out.push("<hr />"); continue; }
+            const quote = line.match(/^>\s?(.*)$/);
+            if (quote) { closeList(); out.push(`<blockquote>${inline(quote[1])}</blockquote>`); continue; }
+
+            const ul = line.match(/^\s*[-*]\s+(.*)$/);
+            if (ul) {
+              if (listType !== "ul") { closeList(); out.push("<ul>"); listType = "ul"; }
+              const task = ul[1].match(/^\[([xX ])\]\s*(.*)$/);
+              if (task) {
+                out.push(`<li><input type="checkbox" disabled${task[1].toLowerCase() === "x" ? " checked" : ""}> ${inline(task[2])}</li>`);
+              } else {
+                out.push(`<li>${inline(ul[1])}</li>`);
+              }
+              continue;
+            }
+            const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+            if (ol) {
+              if (listType !== "ol") { closeList(); out.push("<ol>"); listType = "ol"; }
+              out.push(`<li>${inline(ol[1])}</li>`);
+              continue;
+            }
+            if (!line.trim()) { closeList(); continue; }
+            closeList();
+            out.push(`<p>${inline(line)}</p>`);
+          }
+          closeList();
+          if (inCode && codeLines.length) out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
+          return out.join("\n");
+        }
+      })();
+    </script>
+  </body>
+</html>

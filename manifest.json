@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "id": "pi.mi-note",
+  "name": "小米笔记",
+  "version": "0.1.0",
+  "description": "把小米云笔记做成一个图形化工作面板：扫码登录（手机扫一扫确认，不用密码也不受验证码/两步验证影响）、文件夹 + 列表 + 正文三栏界面、Markdown 编辑、搜索、AI 问答，以及一组内置的笔记操作工具。笔记能力全部内置在插件里，不需要额外配置 MCP 服务器。",
+  "i18n": {
+    "en": {
+      "name": "Mi Note",
+      "description": "Turn Xiaomi Cloud notes into a graphical work panel: QR-code sign-in confirmed on your phone (no password, unaffected by captcha or two-step verification), a three-pane folders/list/body interface, Markdown editing, search, AI question answering over your notes, and built-in tools for reading and writing them. Everything is built into the plugin — no MCP server to configure."
+    }
+  },
+  "author": "QL",
+  "categories": ["productivity"],
+  "main": "main.js",
+  "ui": {
+    "panel": "renderer/index.html",
+    "title": {
+      "en": "Mi Note",
+      "zh-CN": "小米笔记"
+    },
+    "width": 1180,
+    "height": 760
+  },
+  "contributes": {
+    "commands": [
+      {
+        "id": "mi-note.open",
+        "title": "小米笔记: 打开面板",
+        "keywords": ["mi-note", "note", "小米笔记", "笔记"]
+      },
+      {
+        "id": "mi-note.sync",
+        "title": "小米笔记: 立即同步",
+        "keywords": ["mi-note", "sync", "同步"]
+      },
+      {
+        "id": "mi-note.new-note",
+        "title": "小米笔记: 新建笔记",
+        "keywords": ["mi-note", "new", "新建"]
+      },
+      {
+        "id": "mi-note.login",
+        "title": "小米笔记: 扫码登录",
+        "keywords": ["mi-note", "login", "登录", "扫码"]
+      }
+    ],
+    "views": [
+      {
+        "id": "sidebar",
+        "title": {
+          "en": "Mi Note",
+          "zh-CN": "小米笔记"
+        },
+        "icon": "book",
+        "entry": "views/sidebar.html",
+        "order": 45
+      }
+    ],
+    "agentTools": [
+      {
+        "name": "list_folders",
+        "description": "列出小米云笔记的全部文件夹（含每个文件夹的笔记数量）。回答「我有哪些笔记本」或准备按文件夹筛选时先用它。",
+        "risk": "low",
+        "schema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "list_notes",
+        "description": "列出小米云笔记（可按文件夹筛选、按关键词搜索，支持分页）。返回每篇的 id、标题、摘要、文件夹与修改时间。要读全文请接着用 read_note。",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "folderId": { "type": "string", "description": "文件夹 id；省略或传 \"0\" 表示全部笔记。先用 list_folders 取 id。" },
+            "query": { "type": "string", "description": "关键词，匹配标题与正文。" },
+            "limit": { "type": "number", "description": "返回条数，默认 50，最大 200。" },
+            "offset": { "type": "number", "description": "分页偏移，默认 0。" }
+          }
+        }
+      },
+      {
+        "name": "read_note",
+        "description": "读取一篇小米笔记的完整正文（Markdown）。传入 list_notes 返回的 id。",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string", "description": "笔记 id。" }
+          },
+          "required": ["id"]
+        }
+      },
+      {
+        "name": "search_notes",
+        "description": "在所有小米笔记的标题与正文里做关键词搜索，返回命中的笔记与正文片段。适合「我之前记过的关于 X 的内容」。",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "搜索关键词。" },
+            "limit": { "type": "number", "description": "返回条数，默认 10。" }
+          },
+          "required": ["query"]
+        }
+      },
+      {
+        "name": "create_note",
+        "description": "新建一篇小米笔记。内容用 Markdown 书写，插件会负责转成小米笔记的格式。默认写入「全部笔记」（根目录）。",
+        "risk": "medium",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string", "description": "笔记标题。" },
+            "markdown": { "type": "string", "description": "正文，Markdown 格式。" },
+            "folderId": { "type": "string", "description": "目标文件夹 id，省略则放在根目录。" }
+          },
+          "required": ["markdown"]
+        }
+      },
+      {
+        "name": "update_note",
+        "description": "修改一篇已有小米笔记的正文（传完整的 Markdown，会整体替换）、标题或所属文件夹。改之前建议先用 read_note 读一遍，以免覆盖用户的内容。",
+        "risk": "medium",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string", "description": "笔记 id。" },
+            "markdown": { "type": "string", "description": "新的完整正文（Markdown）。省略则保持原正文不变。" },
+            "title": { "type": "string", "description": "新的标题。省略则保持不变。" },
+            "folderId": { "type": "string", "description": "移动到该文件夹 id。省略则不移动。" }
+          },
+          "required": ["id"]
+        }
+      },
+      {
+        "name": "delete_note",
+        "description": "删除一篇小米笔记。默认移到回收站（可在小米笔记客户端恢复）；只有用户明确要求永久删除时才传 purge=true。",
+        "risk": "high",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string", "description": "笔记 id。" },
+            "purge": { "type": "boolean", "description": "true 表示从回收站彻底删除，无法恢复。默认 false。" }
+          },
+          "required": ["id"]
+        }
+      },
+      {
+        "name": "create_folder",
+        "description": "新建一个小米笔记文件夹。",
+        "risk": "medium",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "文件夹名称。" },
+            "parentId": { "type": "string", "description": "父文件夹 id，省略则建在根目录。" }
+          },
+          "required": ["name"]
+        }
+      },
+      {
+        "name": "sync_notes",
+        "description": "立即从小米云同步笔记（正常情况下插件每 5 分钟自动增量同步一次，刚在手机上改了笔记时可以用它强制刷新）。",
+        "risk": "low",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "full": { "type": "boolean", "description": "true 表示忽略增量标记、重新拉取全部正文。默认 false。" }
+          }
+        }
+      },
+      {
+        "name": "note_status",
+        "description": "查看小米笔记插件的状态：是否已登录、本地有多少篇笔记、上次同步时间、最近一次错误。用户说「笔记没更新」或「同步不了」时先用它判断原因。",
+        "risk": "low",
+        "schema": { "type": "object", "properties": {} }
+      }
+    ],
+    "skills": ["skills/mi-note.md"],
+    "services": [
+      {
+        "id": "auto-sync",
+        "label": "小米笔记自动同步"
+      }
+    ],
+    "settings": [
+      {
+        "key": "askModel",
+        "type": "string",
+        "default": "",
+        "title": "AI 问答使用的模型"
+      }
+    ]
+  },
+  "permissions": [
+    "ui.panel",
+    "ui.view",
+    "agent.tool.register",
+    "agent.prompt.inject",
+    "agent.complete",
+    "models.list",
+    "clipboard.write",
+    "background.service"
+  ],
+  "engines": {
+    "piDesktop": ">=0.9.0"
+  },
+  "activationEvents": [
+    "onStartup",
+    "onCommand:mi-note.open",
+    "onCommand:mi-note.sync",
+    "onCommand:mi-note.new-note",
+    "onCommand:mi-note.login"
+  ]
+}
