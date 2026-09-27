@@ -20,7 +20,8 @@
       "zh-CN": "小米笔记"
     },
     "width": 1180,
-    "height": 760
+    "height": 760,
+    "resizable": true
   },
   "contributes": {
     "commands": [

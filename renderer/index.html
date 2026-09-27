@@ -4,10 +4,42 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="pi-plugin-chrome" content="v3" />
+    <!--
+      宿主在 DOMContentLoaded 时「只采样一次」body 的计算颜色，用它给窗口控制胶囊
+      （最小化 / 最大化 / 关闭）上色；而面板主题是异步从 app.getAppearance() 拿到的。
+      如果采样发生在主题落地之前，胶囊就会拿到错误的对比色 —— 在浅色宿主下表现为
+      「白底白图标」，三个按钮看起来完全透明。这里在解析阶段先按窗口的
+      prefers-color-scheme 同步定一次主题，保证宿主采样时 body 已经是正确颜色。
+      之后仍由下面主脚本里的 applyAppearance() 用宿主给的主题值校正。
+    -->
+    <script>
+      (function () {
+        try {
+          var light = window.matchMedia("(prefers-color-scheme: light)").matches;
+          document.documentElement.dataset.base = light ? "light" : "dark";
+        } catch (error) {
+          /* 拿不到媒体查询就保持 CSS 默认（深色） */
+        }
+      })();
+    </script>
     <title>小米笔记</title>
     <style>
       :root {
         color-scheme: dark;
+        /*
+         * 宿主窗口控制胶囊（最小化/最大化/关闭）固定在窗口右上角，
+         * 宽约 96px、贴着右边 8px。顶栏右侧至少留这么多空间，
+         * 才能保证自己的按钮不与它重叠。
+         */
+        --pi-capsule-space: 116px;
+        /*
+         * 窗口控制胶囊的自适应底衬。正常情况下为 transparent（完全不改变外观）；
+         * 只有当宿主采样到的页面颜色与当前页面底色不一致时（宿主主题被显式设成
+         * 与系统偏好相反，导致胶囊图标颜色与页面撞色），才在胶囊下方垫一层高对比
+         * 底衬，保证最小化/最大化/关闭始终清晰可见。几何与宿主胶囊一一对应：
+         * top:9px right:8px，96×28，圆角 999px（见宿主 preload 的 .capsule 规则）。
+         */
+        --pi-capsule-backdrop: transparent;
         --bg: #181818;
         --surface: #1f1f1f;
         --surface-2: #242424;
@@ -44,6 +76,12 @@
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
+      /*
+       * html 铺满并带上页面底色：宿主在无边框窗口的「内容区」按 -webkit-app-region
+       * 判定可拖拽范围，窗口最外沿因此仍能拖动；html 有实底色也保证无边框窗口不会
+       * 出现透明边。真正的 resize 热区由操作系统的无边框窗口提供。
+       */
+      html { background: var(--bg); }
       body {
         margin: 0;
         overflow: hidden;
@@ -70,17 +108,31 @@
       ::-webkit-scrollbar-track { background: transparent; }
 
       /* ── 顶栏 ── */
+      /*
+       * 顶栏布局要点（与宿主的窗口控制胶囊共存）：
+       *   - 宿主在窗口顶部保留 46px 高的透明拖拽带，并在其中右上角画一组
+       *     固定的 最小化/最大化/关闭 胶囊（top:9px right:8px，约 96×28）。
+       *   - 我们的按钮绝不能落在那一带里，否则会和胶囊叠在一起、既看不清也点不动。
+       *     所以顶栏整体下移 titlebar-height，并且右侧留出胶囊宽度（--pi-capsule-space）。
+       *   - titlebar-height 在普通面板里由宿主注入为 46px；预览/嵌入场景为 0。
+       */
       .topbar {
         position: relative;
         flex: 0 0 auto;
         display: flex;
         align-items: center;
         gap: 8px;
-        height: 48px;
-        padding: 0 10px 0 14px;
+        min-height: 52px;
+        /* 上：宿主保留带；右：窗口控制胶囊的宽度 + 间距 */
+        padding: var(--pi-plugin-titlebar-height, 46px) var(--pi-capsule-space, 116px) 0 14px;
         border-bottom: 1px solid var(--border);
         background: var(--surface);
         -webkit-app-region: drag;
+      }
+      /* 顶栏里的实际控件行：位于窗口控制胶囊下方的安全高度处 */
+      .topbar-row {
+        display: flex; align-items: center; gap: 8px;
+        width: 100%;
       }
       .topbar .brand {
         display: flex; align-items: center; gap: 8px;
@@ -92,12 +144,28 @@
         box-shadow: 0 0 0 3px var(--accent-soft);
       }
       .topbar > * { -webkit-app-region: no-drag; }
-      .spacer { flex: 1; }
+      /*
+       * 胶囊底衬：默认不绘制（透明）。只有当 JS 判定宿主采样色与当前底色冲突时才
+       * 显示，且严格落在宿主胶囊的几何范围内，不与顶栏按钮重叠。
+       */
+      .topbar::after {
+        content: "";
+        position: absolute;
+        top: 9px; right: 8px;
+        width: 96px; height: 28px;
+        border-radius: 999px;
+        background: var(--pi-capsule-backdrop);
+        pointer-events: none;
+        z-index: 2;
+      }
+      .spacer { flex: 1; min-width: 0; }
       .status {
         display: flex; align-items: center; gap: 6px;
-        max-width: 380px; overflow: hidden;
+        /* 窄面板时先压缩状态文字，而不是把右侧按钮挤出可视区 */
+        flex: 0 1 auto; min-width: 0;
         color: var(--muted); font-size: 11.5px; white-space: nowrap;
       }
+      .status #statusText { overflow: hidden; text-overflow: ellipsis; }
       .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
       .status[data-state="ok"] .dot { background: var(--ok); }
       .status[data-state="busy"] .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
@@ -124,25 +192,39 @@
       .btn.danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 14%, transparent); color: var(--danger); }
       .btn.icon { padding: 4px 7px; }
 
-      /* ── 主体三栏 ── */
-      .main { flex: 1; display: flex; min-height: 0; }
-      .pane { display: flex; flex-direction: column; min-height: 0; }
-      .folders {
-        flex: 0 0 208px; border-right: 1px solid var(--border); background: var(--surface);
+      /* ── 主体两栏（列表 + 正文，固定比例，不可拖动） ── */
+      /*
+       * 重构说明：此前是「文件夹 + 列表 + 正文」三栏，并靠两条可拖动分隔条 +
+       * JS 动态收敛宽度来调比例。那套方案在无边框 Electron 窗口里反复出问题
+       * （指针捕获失效、拖动死区、窗口缩放把宽度写死），维护成本远超收益。
+       *
+       * 现在改成官网那种固定比例栅格：文件夹收进「列表栏顶部的下拉选择」，
+       * 版面只剩列表栏 + 正文栏，比例由 CSS 栅格决定，随窗口自适应。
+       * 没有任何拖动状态，也就没有任何可被拖坏的中间状态。
+       *
+       * 栅格用 minmax 而不是固定 px，保证窄窗口下两栏都还能用：
+       *   - 列表栏：弹性基准 300px，最少 240px，最多占 42%
+       *   - 正文栏：吃掉剩余全部
+       */
+      .main {
+        flex: 1; display: grid; min-height: 0; overflow: hidden;
+        grid-template-columns: minmax(240px, min(300px, 42%)) minmax(0, 1fr);
+        -webkit-app-region: no-drag;
       }
+      .pane { display: flex; flex-direction: column; min-height: 0; position: relative; }
       .list {
-        flex: 0 0 272px; border-right: 1px solid var(--border); background: var(--bg);
+        border-right: 1px solid var(--border);
+        background: var(--surface);
       }
-      .editor { flex: 1; min-width: 0; background: var(--bg); }
+      .editor { background: var(--bg); }
 
-      .pane-head {
-        flex: 0 0 auto;
-        display: flex; align-items: center; gap: 6px;
-        padding: 8px 10px 6px;
-        color: var(--muted); font-size: 11px;
-        letter-spacing: .05em; text-transform: uppercase;
+      /*
+       * 窄窗口降级：窗口太窄时先保证正文可读，把列表栏压到最小。
+       * 这里只用纯 CSS 断点，不引入任何 JS 计算，避免再次出现状态不一致。
+       */
+      @media (max-width: 560px) {
+        .main { grid-template-columns: minmax(180px, 40%) minmax(0, 1fr); }
       }
-      .pane-head .spacer { flex: 1; }
 
       .search-wrap { flex: 0 0 auto; padding: 0 10px 8px; }
       .search {
@@ -157,24 +239,27 @@
 
       .scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px; }
 
-      .folder-row {
-        display: flex; align-items: center; gap: 7px;
-        width: calc(100% - 12px);
-        margin: 1px 6px;
-        border: 0; border-radius: 7px;
-        padding: 6px 9px;
-        background: transparent;
-        color: var(--secondary); font-size: 12.5px; text-align: left;
-        transition: background .14s ease, color .14s ease;
+      /*
+       * 列表栏顶部：文件夹下拉 + 新建文件夹按钮。
+       * 取代原来的「文件夹独立栏 + 可拖动分隔条」，把纵向空间还给笔记列表。
+       */
+      .list-bar {
+        flex: 0 0 auto;
+        display: flex; align-items: center; gap: 6px;
+        padding: 8px 10px 4px;
       }
-      .folder-row:hover { background: var(--hover); color: var(--fg); }
-      .folder-row[data-selected="true"] {
-        background: var(--accent-soft); color: var(--fg); font-weight: 600;
-        box-shadow: inset 2px 0 0 var(--accent);
+      .folder-select {
+        flex: 1; min-width: 0;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        padding: 5px 8px;
+        background: var(--bg);
+        color: var(--fg);
+        font-size: 12.5px;
+        cursor: pointer;
+        text-overflow: ellipsis;
       }
-      .folder-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .folder-row .count { flex: 0 0 auto; color: var(--faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
-      .folder-row[data-selected="true"] .count { color: var(--secondary); }
+      .folder-select:disabled { opacity: .5; cursor: default; }
 
       .note-item {
         display: block; width: calc(100% - 12px);
@@ -200,6 +285,9 @@
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
         overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 11.5px; line-height: 1.45;
       }
+      /* 局部更新时用 hidden 隐藏摘要/文件夹；需显式覆盖上面的 display: -webkit-box */
+      .note-item .summary[hidden] { display: none; }
+      .note-item .meta .folder[hidden] { display: none; }
 
       .empty {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -395,6 +483,18 @@
       }
       .toast[hidden] { display: none; }
       .toast[data-level="error"] { border-color: color-mix(in oklab, var(--danger) 45%, transparent); color: var(--danger); }
+      /* 带「撤销」按钮的 toast：正文与按钮横排 */
+      .toast .toast-row { display: flex; align-items: center; gap: 10px; }
+      .toast .toast-action {
+        flex: 0 0 auto;
+        border: 0; border-radius: 6px;
+        padding: 3px 9px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12.5px; font-weight: 600;
+        cursor: pointer;
+      }
+      .toast .toast-action:hover { background: color-mix(in oklab, var(--accent) 26%, transparent); }
 
       @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
     </style>
@@ -402,33 +502,25 @@
   <body>
     <div id="app">
       <header class="topbar">
-        <span class="brand"><span class="brand-dot"></span>小米笔记</span>
-        <div class="status" id="status" data-state="busy">
-          <span class="dot"></span><span id="statusText">正在检查登录状态…</span>
+        <!-- 控件行：整体位于宿主窗口控制胶囊下方的安全区，右侧留出胶囊宽度 -->
+        <div class="topbar-row">
+          <span class="brand"><span class="brand-dot"></span>小米笔记</span>
+          <div class="status" id="status" data-state="busy">
+            <span class="dot"></span><span id="statusText">正在检查登录状态…</span>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn" id="btnAsk" disabled>AI 问答</button>
+          <button class="btn" id="btnSync" disabled>同步</button>
+          <button class="btn primary" id="btnNew" disabled>新建</button>
         </div>
-        <div class="spacer"></div>
-        <button class="btn" id="btnAsk" disabled>AI 问答</button>
-        <button class="btn" id="btnSync" disabled>同步</button>
-        <button class="btn primary" id="btnNew" disabled>新建</button>
       </header>
 
       <div class="main" id="main">
-        <!-- 文件夹 -->
-        <section class="pane folders">
-          <div class="pane-head">
-            <span>文件夹</span>
-            <span class="spacer"></span>
-            <button class="btn icon" id="btnNewFolder" title="新建文件夹" disabled>＋</button>
-          </div>
-          <div class="scroll" id="folderList"></div>
-        </section>
-
-        <!-- 列表 -->
+        <!-- 列表（文件夹收进顶部下拉，不再单占一栏） -->
         <section class="pane list">
-          <div class="pane-head">
-            <span id="listScope">全部笔记</span>
-            <span class="spacer"></span>
-            <span id="listCount" style="text-transform:none; letter-spacing:0"></span>
+          <div class="list-bar">
+            <select class="folder-select" id="folderSelect" title="选择文件夹" disabled></select>
+            <button class="btn icon" id="btnNewFolder" title="新建文件夹" disabled>＋</button>
           </div>
           <div class="search-wrap">
             <input class="search" id="search" type="search" placeholder="搜索标题与正文…" disabled />
@@ -562,6 +654,51 @@
           toastTimer = setTimeout(() => { el.hidden = true; }, level === "error" ? 6000 : 3200);
         };
 
+        /**
+         * 带一个操作按钮的提示条（目前用于「已删除 · 撤销」）。
+         *
+         * 返回一个函数，调用它可立即收起提示（撤销或超时后调用，
+         * 避免旧提示还在屏幕上但已经失效）。
+         */
+        let actionToastTimer = null;
+        const toastWithAction = (message, actionLabel, onAction, durationMs = 6000) => {
+          const el = $("toast");
+          el.dataset.level = "info";
+          el.textContent = "";
+
+          const row = document.createElement("div");
+          row.className = "toast-row";
+          const text = document.createElement("span");
+          text.textContent = message;
+          const action = document.createElement("button");
+          action.type = "button";
+          action.className = "toast-action";
+          action.textContent = actionLabel;
+          row.append(text, action);
+          el.appendChild(row);
+          el.hidden = false;
+
+          let done = false;
+          const dismiss = () => {
+            if (done) return;
+            done = true;
+            if (actionToastTimer) {
+              clearTimeout(actionToastTimer);
+              actionToastTimer = null;
+            }
+            action.removeEventListener("click", onActionClick);
+            el.hidden = true;
+          };
+          const onActionClick = () => {
+            dismiss();
+            onAction();
+          };
+          action.addEventListener("click", onActionClick);
+          if (actionToastTimer) clearTimeout(actionToastTimer);
+          actionToastTimer = setTimeout(dismiss, durationMs);
+          return dismiss;
+        };
+
         // Electron 的窗口不实现 window.prompt（调用会直接返回 null），
         // 所以自备一个输入对话框。返回用户输入，取消返回 null。
         const askText = (title, initial) =>
@@ -625,6 +762,16 @@
           selectedId: null,
           draft: { id: null, title: "", markdown: "", dirty: false },
           mode: "preview",
+          /*
+           * 已「乐观删除」但尚未真正提交的笔记 id。
+           *
+           * 删除后先把它从列表里隐起来，给 6 秒撤销窗口；期间若发生同步，
+           * 云端会把这篇笔记又拉回来 —— 所以 renderNotes 必须过滤这个集合，
+           * 否则被删的笔记会「复活」出现在列表里。
+           */
+          pendingDelete: new Set(),
+          /* IME 合成中标记：合成期间只更新内存，不触发保存 */
+          composing: false,
           loginJobId: null,
           loginExpiresAt: 0,
           loginTimer: null,
@@ -632,6 +779,95 @@
           askModel: "",
           askBusy: false,
         };
+
+        /*
+         * 布局说明：本面板已重构为「固定比例两栏栅格」（列表 + 正文）。
+         *
+         * 此前的三栏 + 可拖动分隔条方案已整体删除，原因见 CSS 里的注释：
+         * 在无边框 Electron 窗口里，指针捕获、拖动死区、窗口缩放回写宽度
+         * 这一连串问题反复出现，维护成本远大于收益。
+         * 现在版面比例完全由 CSS 决定，JS 不再参与任何宽度计算。
+         */
+
+        /*
+         * 只有在确认没有宿主保留带时，才把右侧预留收回普通内边距。
+         * 判据必须严格：只有变量被显式设成 0（嵌入/组件模式）才收回；
+         * 变量还没注入（""）时保持 CSS 默认的 116px，
+         * 否则一旦宿主注入晚于脚本执行，顶栏按钮又会和窗口控制胶囊叠在一起。
+         */
+        const syncCapsuleSpace = () => {
+          const raw = getComputedStyle(document.documentElement)
+            .getPropertyValue("--pi-plugin-titlebar-height")
+            .trim();
+          const value = raw === "" ? NaN : parseFloat(raw);
+          if (!Number.isFinite(value)) return; // 还不知道，保持默认
+          document.documentElement.style.setProperty(
+            "--pi-capsule-space",
+            value > 0 ? "116px" : "14px",
+          );
+        };
+        syncCapsuleSpace();
+        // 宿主在 DOMContentLoaded 时才注入变量/安装 chrome，这里补一次
+        document.addEventListener("DOMContentLoaded", syncCapsuleSpace);
+        window.addEventListener("load", syncCapsuleSpace);
+
+        /*
+         * 胶囊底衬保险：宿主给胶囊上色用的是「安装 chrome 那一刻采样到的页面颜色」，
+         * 之后页面若因主题切换而改色，胶囊就可能与页面撞色（浅色下白底白图标）。
+         * 这里把宿主采样到的前景色按胶囊实际的 58% 不透明度合成到当前页面底色上，
+         * 算 WCAG 对比度；低于可辨阈值时，用「宿主采样到的页面底色」垫一块底衬 ——
+         * 那正是宿主以为的页面颜色，铺上去就把胶囊还原成宿主本意的对比度。
+         * 一切正常时保持透明，完全不改变外观。
+         */
+        const syncCapsuleBackdrop = () => {
+          const root = document.documentElement;
+          const host = document.querySelector("pi-plugin-panel-chrome");
+          const setBackdrop = (value) => root.style.setProperty("--pi-capsule-backdrop", value);
+          if (!host) return setBackdrop("transparent"); // 预览 / 嵌入：没有宿主 chrome
+
+          const parseRgb = (color) => {
+            const match = String(color || "").match(/rgba?\(([^)]+)\)/i);
+            if (!match) return null;
+            const parts = match[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+            if (parts.length < 3 || parts.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
+            const alpha = parts.length >= 4 && Number.isFinite(parts[3]) ? parts[3] : 1;
+            return { r: parts[0], g: parts[1], b: parts[2], a: alpha };
+          };
+          const luminance = ({ r, g, b }) => {
+            const channel = (value) => {
+              const v = value / 255;
+              return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+            };
+            return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+          };
+
+          const sampledFg = parseRgb(host.style.getPropertyValue("--pi-plugin-panel-page-foreground"));
+          const sampledBg = parseRgb(host.style.getPropertyValue("--pi-plugin-panel-page-background"));
+          const pageBg = parseRgb(getComputedStyle(document.body).backgroundColor);
+          if (!sampledFg || !pageBg || pageBg.a === 0) return setBackdrop("transparent");
+
+          // 胶囊图标 = 采样前景色 × 58% 叠在当前页面底色上
+          const glyph = {
+            r: sampledFg.r * 0.58 + pageBg.r * 0.42,
+            g: sampledFg.g * 0.58 + pageBg.g * 0.42,
+            b: sampledFg.b * 0.58 + pageBg.b * 0.42,
+          };
+          const l1 = luminance(glyph);
+          const l2 = luminance(pageBg);
+          const contrast = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+          if (contrast >= 3) return setBackdrop("transparent");
+
+          // 对比度不足：铺上宿主采样到的底色（也就是它以为的页面颜色）
+          if (!sampledBg) return setBackdrop("transparent");
+          setBackdrop(`rgba(${Math.round(sampledBg.r)}, ${Math.round(sampledBg.g)}, ${Math.round(sampledBg.b)}, 0.92)`);
+        };
+        syncCapsuleBackdrop();
+        document.addEventListener("DOMContentLoaded", syncCapsuleBackdrop);
+        window.addEventListener("load", syncCapsuleBackdrop);
+        // 主题落地后再复核（applyAppearance 已改过 data-base），多跑几次以覆盖异步时序
+        setTimeout(syncCapsuleBackdrop, 0);
+        setTimeout(syncCapsuleBackdrop, 300);
+        setTimeout(syncCapsuleBackdrop, 1200);
 
         // ── 状态栏 ──────────────────────────────────────────────────────────
         const setStatus = (text, kind) => {
@@ -755,31 +991,25 @@
           if (!state.loggedIn) setStatus("尚未登录", "warn");
         });
 
-        // ── 文件夹 ──────────────────────────────────────────────────────────
+        // ── 文件夹（重构后收进列表栏顶部的下拉框） ──────────────────────────
         const renderFolders = () => {
-          const box = $("folderList");
-          box.textContent = "";
-          const root = document.createElement("button");
-          root.className = "folder-row";
-          root.dataset.selected = String(state.folderId === "0");
-          root.innerHTML = '<span class="name"></span><span class="count"></span>';
-          root.querySelector(".name").textContent = "全部笔记";
+          const select = $("folderSelect");
+          select.textContent = "";
+          // 「全部笔记」+ 各文件夹；计数直接写进选项文字，省掉一栏的空间
           const rootCount = state.folders.reduce((sum, f) => sum + f.count, 0);
-          root.querySelector(".count").textContent = String(rootCount);
-          root.addEventListener("click", () => selectFolder("0"));
-          box.appendChild(root);
+          const rootOption = document.createElement("option");
+          rootOption.value = "0";
+          rootOption.textContent = `全部笔记（${rootCount}）`;
+          select.appendChild(rootOption);
 
           for (const folder of state.folders) {
-            const row = document.createElement("button");
-            row.className = "folder-row";
-            row.dataset.selected = String(state.folderId === folder.id);
-            row.innerHTML = '<span class="name"></span><span class="count"></span>';
-            row.querySelector(".name").textContent = folder.name;
-            row.querySelector(".count").textContent = String(folder.count);
-            row.title = folder.name;
-            row.addEventListener("click", () => selectFolder(folder.id));
-            box.appendChild(row);
+            const option = document.createElement("option");
+            option.value = folder.id;
+            option.textContent = `${folder.name}（${folder.count}）`;
+            select.appendChild(option);
           }
+          select.value = state.folderId;
+          select.disabled = !state.loggedIn;
         };
 
         const loadFolders = async () => {
@@ -790,64 +1020,135 @@
         };
 
         const selectFolder = async (folderId) => {
+          if (state.folderId === folderId) return;
+          // 切文件夹会重拉列表，先把草稿存好，避免未保存的修改被列表刷新带走
+          await flushSave();
           state.folderId = folderId;
           renderFolders();
-          const folder = state.folders.find((f) => f.id === folderId);
-          $("listScope").textContent = folder ? folder.name : "全部笔记";
           await loadNotes();
         };
 
+        $("folderSelect").addEventListener("change", (event) => {
+          void selectFolder(event.target.value);
+        });
+
         // ── 列表 ────────────────────────────────────────────────────────────
+        /*
+         * 列表采用「局部更新」而非整表重建。
+         *
+         * 原来每次保存 / 切文件夹 / 搜索都会 textContent = "" 后重建最多 300 个节点，
+         * 代价是：滚动位置丢失、选中态闪动、每次自动保存都要重建一遍（自动保存
+         * 一秒可能触发一次，这个代价不能接受）。现在按 id 复用节点，只改变化的部分。
+         */
+        const noteNodes = new Map(); // id -> { el, title, meta, folder, summary }
+
+        /** 建一个笔记节点。只在这里创建 DOM，后续更新走 updateNoteNode。 */
+        const createNoteNode = (note) => {
+          const el = document.createElement("button");
+          el.className = "note-item";
+          el.dataset.id = note.id;
+
+          const title = document.createElement("span");
+          title.className = "title";
+
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          const time = document.createElement("span");
+          time.className = "time";
+          const folder = document.createElement("span");
+          folder.className = "folder";
+          meta.append(time, folder);
+
+          const summary = document.createElement("span");
+          summary.className = "summary";
+
+          el.append(title, meta, summary);
+          // 事件只绑一次；点击时按当前 dataset.id 打开，避免闭包引用过期对象
+          el.addEventListener("click", () => {
+            const id = el.dataset.id;
+            if (id) void openNote(id);
+          });
+          const entry = { el, title, meta, time, folder, summary };
+          updateNoteNode(entry, note);
+          return entry;
+        };
+
+        /** 只写真正变化的文本，避免无谓的 DOM 写入与重排。 */
+        const setText = (node, value) => {
+          if (node.textContent !== value) node.textContent = value;
+        };
+
+        const updateNoteNode = (entry, note) => {
+          setText(entry.title, note.title || "无标题笔记");
+          setText(entry.time, formatTime(note.modifyDate));
+          const folderText = note.folderName ? `· ${note.folderName}` : "";
+          setText(entry.folder, folderText);
+          entry.folder.hidden = !folderText;
+          const summaryText = note.summary || "";
+          setText(entry.summary, summaryText);
+          entry.summary.hidden = !summaryText;
+          const selected = String(note.id === state.selectedId);
+          if (entry.el.dataset.selected !== selected) entry.el.dataset.selected = selected;
+        };
+
+        const renderEmptyState = (box) => {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          const big = document.createElement("div");
+          big.className = "big";
+          big.textContent = state.query ? "没有匹配的笔记" : "这里还没有笔记";
+          const small = document.createElement("div");
+          small.className = "small";
+          small.textContent = state.query
+            ? "换个关键词试试，或清空搜索框。"
+            : "点右上角「新建」写一篇，或在手机上记一条后点「同步」。";
+          empty.append(big, small);
+          box.appendChild(empty);
+        };
+
         const renderNotes = () => {
           const box = $("noteList");
-          box.textContent = "";
-          $("listCount").textContent = state.total ? `${state.total}` : "";
 
-          if (!state.notes.length) {
-            const empty = document.createElement("div");
-            empty.className = "empty";
-            const big = document.createElement("div");
-            big.className = "big";
-            big.textContent = state.query ? "没有匹配的笔记" : "这里还没有笔记";
-            const small = document.createElement("div");
-            small.className = "small";
-            small.textContent = state.query
-              ? "换个关键词试试，或清空搜索框。"
-              : "点右上角「新建」写一篇，或在手机上记一条后点「同步」。";
-            empty.append(big, small);
-            box.appendChild(empty);
+          // 删除待删项（乐观删除，见 deleteNote）
+          const visible = state.notes.filter((note) => !state.pendingDelete.has(String(note.id)));
+
+          if (!visible.length) {
+            noteNodes.clear();
+            box.textContent = "";
+            renderEmptyState(box);
             return;
           }
 
-          for (const note of state.notes) {
-            const item = document.createElement("button");
-            item.className = "note-item";
-            item.dataset.selected = String(note.id === state.selectedId);
+          // 空状态占位符要清掉
+          const placeholder = box.querySelector(".empty");
+          if (placeholder) placeholder.remove();
 
-            const title = document.createElement("span");
-            title.className = "title";
-            title.textContent = note.title || "无标题笔记";
-
-            const meta = document.createElement("div");
-            meta.className = "meta";
-            const time = document.createElement("span");
-            time.textContent = formatTime(note.modifyDate);
-            meta.appendChild(time);
-            if (note.folderName) {
-              const folder = document.createElement("span");
-              folder.className = "folder";
-              folder.textContent = `· ${note.folderName}`;
-              meta.appendChild(folder);
+          const seen = new Set();
+          let cursor = box.firstChild;
+          for (const note of visible) {
+            const id = String(note.id);
+            seen.add(id);
+            let entry = noteNodes.get(id);
+            if (!entry) {
+              entry = createNoteNode(note);
+              noteNodes.set(id, entry);
+            } else {
+              updateNoteNode(entry, note);
             }
+            // 按目标顺序把节点摆到 cursor 位置：已在位就跳过，否则插到前面。
+            // 这样顺序没变时零移动，只有真正换序/新增才动 DOM。
+            if (cursor === entry.el) {
+              cursor = cursor.nextSibling;
+            } else {
+              box.insertBefore(entry.el, cursor);
+            }
+          }
 
-            const summary = document.createElement("span");
-            summary.className = "summary";
-            summary.textContent = note.summary || "";
-
-            item.append(title, meta);
-            if (note.summary) item.appendChild(summary);
-            item.addEventListener("click", () => openNote(note.id));
-            box.appendChild(item);
+          // 清掉本轮不再出现的节点
+          for (const [id, entry] of noteNodes) {
+            if (seen.has(id)) continue;
+            entry.el.remove();
+            noteNodes.delete(id);
           }
         };
 
@@ -867,6 +1168,40 @@
           renderNotes();
         };
 
+        /**
+         * 只刷新一篇笔记在列表里的显示（保存后调用）。
+         *
+         * 替代原先的 `await loadNotes()`：后者会重新拉整份列表并重建节点，
+         * 自动保存下代价过高。这里直接按 id 定位节点做局部更新。
+         */
+        const refreshNoteInList = (note) => {
+          if (!note) return;
+          const id = String(note.id);
+          const index = state.notes.findIndex((n) => String(n.id) === id);
+          if (index < 0) {
+            // 列表里还没有（比如在「全部笔记」之外的文件夹新建）：退回一次轻量刷新
+            void loadNotes();
+            return;
+          }
+          const prev = state.notes[index];
+          state.notes[index] = {
+            ...prev,
+            title: note.title ?? prev.title,
+            summary: note.summary ?? prev.summary,
+            folderId: note.folderId ?? prev.folderId,
+            folderName: note.folderName ?? prev.folderName,
+            modifyDate: note.modifyDate ?? prev.modifyDate,
+          };
+          // 修改时间变了要重排；否则只更新节点内容
+          const moved = Number(state.notes[index].modifyDate) !== Number(prev.modifyDate);
+          if (moved) {
+            state.notes.sort((a, b) => Number(b.modifyDate ?? 0) - Number(a.modifyDate ?? 0));
+          }
+          const entry = noteNodes.get(id);
+          if (entry) updateNoteNode(entry, state.notes[index]);
+          if (moved) renderNotes();
+        };
+
         // 搜索：输入后 250ms 去抖
         let searchTimer = null;
         $("search").addEventListener("input", (event) => {
@@ -881,8 +1216,63 @@
         // ── 编辑器 ──────────────────────────────────────────────────────────
         const setDirty = (dirty) => {
           state.draft.dirty = dirty;
-          $("savedHint").textContent = dirty ? "未保存" : "";
+          if (dirty) {
+            // 有未保存改动时立刻安排自动保存，不再让用户手动点
+            scheduleAutosave();
+          } else {
+            cancelAutosave();
+          }
+          if (dirty) {
+            $("savedHint").textContent = "未保存";
+          } else if ($("savedHint").textContent === "未保存") {
+            $("savedHint").textContent = "";
+          }
           $("btnSave").disabled = !dirty || !state.selectedId;
+        };
+
+        /*
+         * ── 自动保存 ───────────────────────────────────────────────────────
+         *
+         * 目标：用户不必点保存，切笔记也不丢草稿。三个必须处理的坑：
+         *
+         *  1) 输入法（IME）合成中不能保存。
+         *     中文输入时每个按键都会触发 input，但此刻 textarea.value 只是拼音串，
+         *     直接存下去会把「nihao」这种中间态写进云端。判据用 event.isComposing，
+         *     并用 compositionstart/end 兜住 isComposing 不可靠的老环境。
+         *
+         *  2) 切笔记 / 关面板必须先冲刷。
+         *     原来的 openNote 是 confirm() 询问「要丢弃吗」—— 有了自动保存就不该再
+         *     丢东西，改成 await flushSave() 把草稿存下去再切。
+         *
+         *  3) 不能每秒都写整份磁盘缓存。
+         *     repository.updateNote 结尾会 writeCache(serialize())，即整份缓存重写。
+         *     自动保存一秒一次会把磁盘打满。所以：云端更新按 ~1.5s 去抖，
+         *     本地磁盘缓存由后端自己节流（见 repository 的 scheduleCacheWrite）。
+         */
+        const AUTOSAVE_DELAY_MS = 1500;
+        let autosaveTimer = null;
+        let saveInFlight = null;
+
+        const cancelAutosave = () => {
+          if (autosaveTimer) {
+            clearTimeout(autosaveTimer);
+            autosaveTimer = null;
+          }
+        };
+
+        const scheduleAutosave = () => {
+          if (autosaveTimer) clearTimeout(autosaveTimer);
+          autosaveTimer = setTimeout(() => {
+            autosaveTimer = null;
+            void saveNote({ auto: true });
+          }, AUTOSAVE_DELAY_MS);
+        };
+
+        /** 立即把未保存的草稿写下去（切笔记 / 关面板 / Ctrl+S 用）。 */
+        const flushSave = async () => {
+          cancelAutosave();
+          if (state.draft.id === null || !state.draft.dirty) return;
+          await saveNote({ auto: true });
         };
 
         const renderEditor = () => {
@@ -912,8 +1302,24 @@
             textarea.spellcheck = false;
             textarea.value = note.markdown;
             textarea.placeholder = "用 Markdown 记点什么…";
+            textarea.addEventListener("compositionstart", () => {
+              state.composing = true;
+            });
+            textarea.addEventListener("compositionend", () => {
+              state.composing = false;
+              // 合成结束这一次 input 会被浏览器紧接着派发；这里直接记下来并安排保存，
+              // 保证最后一个字的修改不会因为「合成中跳过」而漏掉。
+              note.markdown = textarea.value;
+              setDirty(true);
+            });
             textarea.addEventListener("input", () => {
               note.markdown = textarea.value;
+              // IME 合成中：只更新内存，不触发保存（否则会存下拼音中间态）
+              if (state.composing) {
+                $("savedHint").textContent = "未保存";
+                $("btnSave").disabled = !state.selectedId;
+                return;
+              }
               setDirty(true);
             });
             body.appendChild(textarea);
@@ -942,10 +1348,19 @@
         }
 
         const openNote = async (noteId) => {
-          if (state.draft.dirty && !confirm("当前笔记有未保存的修改，切换会丢弃它们。继续吗？")) return;
-          state.selectedId = noteId;
+          const id = String(noteId);
+          if (state.selectedId === id) return;
+
+          /*
+           * 切笔记不再询问「要丢弃修改吗」：先把草稿冲刷下去。
+           * 自动保存可能还没来得及跑（去抖 1.5s），这里必须同步等它写完，
+           * 否则刚打的字会在切换瞬间丢掉。
+           */
+          await flushSave();
+
+          state.selectedId = id;
           renderNotes();
-          const res = await invoke("mn.note.get", { id: noteId });
+          const res = await invoke("mn.note.get", { id });
           if (!res.ok || !res.note) {
             toast(res.error || "读取笔记失败", "error");
             return;
@@ -957,6 +1372,7 @@
             folderId: res.note.folderId,
             dirty: false,
           };
+          state.composing = false;
           $("titleInput").value = state.draft.title;
           $("savedHint").textContent = "";
           $("btnSave").disabled = true;
@@ -969,29 +1385,69 @@
           setDirty(true);
         });
 
-        const saveNote = async () => {
+        const saveNote = async ({ auto = false } = {}) => {
           if (state.draft.id === null || !state.draft.dirty) return;
-          $("btnSave").disabled = true;
-          $("savedHint").textContent = "保存中…";
-          const res = await invoke("mn.note.update", {
+          // 并发保护：自动保存与手动保存可能撞在一起，复用同一个 in-flight Promise
+          if (saveInFlight) {
+            await saveInFlight;
+            // 上一次保存完成后可能又有新改动，交给下一次调度
+            if (!state.draft.dirty) return;
+          }
+          // 记下这次要保存的内容；保存期间用户可能继续输入
+          const snapshot = {
             id: state.draft.id,
             title: state.draft.title,
             markdown: state.draft.markdown,
-          });
-          if (!res.ok) {
-            $("savedHint").textContent = "";
-            $("btnSave").disabled = false;
-            toast(res.error || "保存失败", "error");
-            return;
+          };
+          cancelAutosave();
+          if (!auto) {
+            $("btnSave").disabled = true;
+            $("savedHint").textContent = "保存中…";
+          } else {
+            $("savedHint").textContent = "保存中…";
           }
-          state.draft.dirty = false;
-          $("savedHint").textContent = "已保存";
-          setTimeout(() => {
-            if (!state.draft.dirty) $("savedHint").textContent = "";
-          }, 2200);
-          await loadNotes();
+
+          saveInFlight = (async () => {
+            const res = await invoke("mn.note.update", {
+              id: snapshot.id,
+              title: snapshot.title,
+              markdown: snapshot.markdown,
+            });
+            if (!res.ok) {
+              toast(res.error || "保存失败", "error");
+              $("savedHint").textContent = "保存失败";
+              $("btnSave").disabled = false;
+              return;
+            }
+            // 只有当前草稿仍是这一篇时才清 dirty（用户可能已经切走了）
+            if (state.draft.id === snapshot.id) {
+              const unchanged =
+                state.draft.title === snapshot.title && state.draft.markdown === snapshot.markdown;
+              state.draft.dirty = !unchanged;
+              $("savedHint").textContent = unchanged ? "已保存" : "未保存";
+              $("btnSave").disabled = unchanged;
+              if (unchanged) {
+                setTimeout(() => {
+                  if (state.draft.id === snapshot.id && !state.draft.dirty) {
+                    $("savedHint").textContent = "";
+                  }
+                }, 2200);
+              } else {
+                // 保存期间又有改动：继续安排下一次自动保存
+                scheduleAutosave();
+              }
+            }
+            // 列表只做局部更新，不再整份重拉重建
+            if (res.note) refreshNoteInList(res.note);
+          })();
+
+          try {
+            await saveInFlight;
+          } finally {
+            saveInFlight = null;
+          }
         };
-        $("btnSave").addEventListener("click", saveNote);
+        $("btnSave").addEventListener("click", () => void saveNote());
 
         document.addEventListener("keydown", (event) => {
           const meta = event.ctrlKey || event.metaKey;
@@ -1001,9 +1457,23 @@
           }
         });
 
+        /*
+         * 面板关闭 / 隐藏前尽力把草稿冲下去。
+         * pagehide 里发起 IPC 不保证能跑完，所以方向选「宁可留在本地未保存」，
+         * 不做任何可能报错的强制写。visibilitychange 覆盖切标签页的情况。
+         */
+        window.addEventListener("pagehide", () => {
+          if (state.draft.dirty) void flushSave();
+        });
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "hidden" && state.draft.dirty) void flushSave();
+        });
+
         $("btnNew").addEventListener("click", async () => {
           const title = await askText("新笔记的标题（可以留空）", "");
           if (title === null) return;
+          // 新建会切走当前笔记，先把草稿冲下去
+          await flushSave();
           const res = await invoke("mn.note.create", {
             title: title.trim(),
             markdown: "",
@@ -1014,29 +1484,83 @@
             return;
           }
           await loadNotes();
-          await openNote(res.note.id);
+          await loadFolders();
+          // 先切到编辑模式再打开，避免「打开（预览）→ 再切编辑」白渲染一次
           state.mode = "edit";
           for (const tab of document.querySelectorAll(".tab")) {
             tab.dataset.active = String(tab.dataset.mode === "edit");
           }
-          renderEditor();
+          await openNote(res.note.id);
         });
 
-        $("btnDelete").addEventListener("click", async () => {
-          if (state.draft.id === null) return;
-          if (!confirm("把这篇笔记移到小米笔记回收站？稍后可以在手机或网页端恢复。")) return;
-          const res = await invoke("mn.note.delete", { id: state.draft.id, purge: false });
-          if (!res.ok) {
-            toast(res.error || "删除失败", "error");
-            return;
+        /*
+         * ── 删除（取消回收站，改为「直接删 + 可撤销」）────────────────────────
+         *
+         * 服务端没有「从回收站恢复」的接口，所以撤销不能靠删完再恢复。
+         * 这里用「延迟提交」：先把笔记从列表里隐起来（乐观删除），给 6 秒撤销窗口，
+         * 窗口内没撤销才真正调用删除接口。
+         *
+         * 两个必须注意的点：
+         *   - renderNotes 要过滤 state.pendingDelete，否则 5 分钟自动同步把云端
+         *     数据拉回来后，这篇笔记会「复活」出现在列表里。
+         *   - 待删笔记如果正开着，要先把编辑器清空，避免用户对着已删笔记继续打字。
+         */
+        const DELETE_UNDO_MS = 6000;
+        let pendingDeleteTimer = null;
+
+        /** 真正把待删的笔记提交到云端（不可撤销）。 */
+        const commitPendingDeletes = async () => {
+          const ids = [...state.pendingDelete];
+          state.pendingDelete.clear();
+          if (pendingDeleteTimer) {
+            clearTimeout(pendingDeleteTimer);
+            pendingDeleteTimer = null;
           }
+          if (!ids.length) return;
+          for (const id of ids) {
+            const res = await invoke("mn.note.delete", { id, purge: true });
+            if (!res.ok) {
+              // 提交失败就把它放回列表，别让用户以为删掉了
+              toast(res.error || "删除失败", "error");
+            }
+          }
+          await loadNotes();
+          await loadFolders();
+        };
+
+        $("btnDelete").addEventListener("click", async () => {
+          const id = state.draft.id;
+          if (id === null) return;
+          // 有未保存改动先冲下去，避免待会儿删除与保存打架
+          await flushSave();
+
+          state.pendingDelete.add(String(id));
+          // 清空编辑器：这篇已经从列表里拿掉了
           state.selectedId = null;
           state.draft = { id: null, title: "", markdown: "", dirty: false };
           $("titleInput").value = "";
+          $("savedHint").textContent = "";
           renderEditor();
-          await loadNotes();
-          await loadFolders();
-          toast("已移入回收站");
+          renderNotes();
+
+          const dismiss = toastWithAction("已删除", "撤销", () => {
+            // 撤销：把它从待删集合里去掉即可，云端还没动过
+            state.pendingDelete.delete(String(id));
+            if (pendingDeleteTimer) {
+              clearTimeout(pendingDeleteTimer);
+              pendingDeleteTimer = null;
+            }
+            renderNotes();
+            void loadFolders();
+            toast("已恢复");
+          }, DELETE_UNDO_MS);
+
+          if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer);
+          pendingDeleteTimer = setTimeout(() => {
+            pendingDeleteTimer = null;
+            dismiss();
+            void commitPendingDeletes();
+          }, DELETE_UNDO_MS);
         });
 
         $("btnNewFolder").addEventListener("click", async () => {
@@ -1213,9 +1737,14 @@
             showLogin();
             await startLogin();
           } else {
-            await loadFolders();
-            await loadNotes();
-            await consumeFocus();
+            /*
+             * 首次打开要快：mn.status / mn.folders.list / mn.notes.list 都是内存读取，
+             * 但它们仍是 3 次串行 IPC。这里并行发出，省掉两轮往返；
+             * consumeFocus（侧边栏「在主面板打开」的待办）与首屏无关，放到最后，
+             * 不让它挡在列表渲染之前。
+             */
+            await Promise.all([loadFolders(), loadNotes()]);
+            void consumeFocus();
           }
           // 面板打开时轻量轮询状态，让「同步中 / 上次同步」保持新鲜
           setInterval(async () => {
