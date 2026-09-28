@@ -23,6 +23,9 @@
   空项回车退出列表）、格式快捷键；**全部可 Ctrl/Cmd+Z 撤销**
 - **大纲**：H1–H5 目录，滚动联动高亮当前小节，点击跳转（编辑模式下定位到源码行）
 - **搜索增强**：列表与正文同时高亮命中词，并滚到正文第一处；跳过代码块内部
+- **导出**：把当前笔记取走 —— Markdown 源码，或**自包含 HTML**（样式、代码高亮、
+  KaTeX 字体、附件图片全部内联成单文件，离线打开也不缺东西），可切深色配色。
+  走系统剪贴板，**不新增任何文件读写权限**
 
 ### 变更
 
@@ -41,6 +44,13 @@
 - 退出登录时一并清空附件缓存（二进制可能含隐私内容）
 - 编辑器改动改用 `execCommand('insertText')`：`setRangeText` 不进原生撤销栈，
   用它会让工具栏操作变成不可撤销（实测确认）
+- **导出无法读取 vendor 样式**：面板是 `file://` + `sandbox` + `webSecurity` 的页面，
+  脚本读不了同目录文件（XHR 被拦，与 module script 被 CORS 拦是同一类问题）。
+  改为在打包前把 KaTeX 的 woff2 与两份 hljs 主题**烧进** `renderer/lib/assets.js`
+  （`node tools/embed-assets.js`，产物带指纹，verify 会校验它是否落后于 vendor）
+- **导出/大纲按钮状态互相覆盖**：启动时 `refreshStatus()` 的 `setEnabled(true)` 会
+  把 `renderEditor()` 刚置灰的按钮又点亮，导致未选中笔记时按钮可点。
+  现收敛到唯一的判定函数 `syncActionButtons()`
 
 ## 0.1.1
 

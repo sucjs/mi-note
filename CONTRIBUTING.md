@@ -30,6 +30,7 @@ skills/mi-note.md       注入给 Agent 的使用说明
 
 ```
 tools/pack.js           打包（store-only ZIP）
+tools/embed-assets.js   把导出要用的样式/字体内联成 renderer/lib/assets.js
 tools/verify.js         校验产物
 tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
 ```
@@ -40,6 +41,7 @@ tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
 ## 打包与校验
 
 ```bash
+node tools/embed-assets.js     # 改了 vendor 样式/字体后必须先跑（见下）
 node tools/pack.js mi-note     # → mi-note/dist/pi.mi-note-<版本>.piplug
 node tools/verify.js           # 校验产物
 ```
@@ -47,16 +49,32 @@ node tools/verify.js           # 校验产物
 `pack.js` 手写 ZIP 结构。**关键约束**：`.piplug` 必须是 store-only（不压缩）的 ZIP，
 宿主安装器会拒绝 deflate 条目。
 
+### 为什么要单独跑 embed-assets.js
+
+导出功能要生成「自包含 HTML」，得把 KaTeX 字体与两份 hljs 主题写进导出文件。
+但面板窗口是 `file://` + `sandbox: true` + `webSecurity: true`（宿主没有加
+`allow-file-access-from-files`），**脚本读不了同目录的 vendor 文件** —— XHR / fetch
+会被拦掉，和 `<script type="module">` 被 CORS 拦掉是同一类问题。
+
+所以这些内容只能在打包前「烧」进 `renderer/lib/assets.js`：
+
+- 产物是**生成物**，不要手改；改样式请改 `vendor/`，然后重跑脚本
+- 产物里带一个 vendor 内容指纹；`verify.js` 会复算并比对，
+  **改了 vendor 却忘了重跑就会直接报错**（防止导出悄悄少了字体）
+- 只内联 woff2（woff / ttf 是给老浏览器兜底的，白白多几百 KB）
+
 `verify.js` 做四类检查：
 
 | 类别 | 内容 |
 | --- | --- |
 | 结构 | 文件数 ≤ 2000、体积 < 50 MB、全部 store-only |
 | 内容 | 包内每个条目与源文件逐字节比对 |
-| 回归 | 断言历史修复仍在（界面、自动保存、局部更新、删除撤销等） |
+| 回归 | 断言历史修复仍在（界面、自动保存、局部更新、删除撤销、导出等） |
 | 文档 | README / manifest 的描述与实现一致，开发文件没混进包 |
 
 回归与文档两类是重点：把每个踩过的坑固化成断言，避免改代码时无声回归。
+其中「导出不得引入 `fs.*` 权限」与「assets.js 指纹」两类断言尤其不能删 ——
+它们守住的是对外承诺（不读写工作区文件）与构建产物不漂移。
 
 ## 调试：ui-harness
 

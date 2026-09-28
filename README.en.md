@@ -43,6 +43,12 @@ Search hits are **highlighted** in both the list and the body, and the view scro
 **Outline** — a toggleable H1–H5 table of contents beside the body. The current section is
 highlighted as you scroll, and clicking an entry jumps to it.
 
+**Export** — take the current note with you: **Markdown source** (plain text, paste into any
+editor and save as `.md`) or **self-contained HTML** (styles, syntax highlighting, math fonts
+and attachment images all inlined into a single file — paste into `.html` and it opens offline
+with nothing missing). A dark colour scheme is available.
+Export goes through the system clipboard, so it adds **no file read/write permission**.
+
 **Markdown preview** — headings, tables, nested lists, task lists, quotes, code blocks with
 **syntax highlighting**, math (KaTeX, inline `$…$` and block `$$…$$`), images, underline and
 highlight spans all render correctly. Images inside notes are downloaded on demand and cached

@@ -44,6 +44,8 @@
     <script src="lib/markdown.js"></script>
     <script src="lib/editor.js"></script>
     <script src="lib/outline.js"></script>
+    <script src="lib/assets.js"></script>
+    <script src="lib/export.js"></script>
     <style>
       :root {
         color-scheme: dark;
@@ -587,6 +589,32 @@
       .input-dialog .box .hint { margin: 0 0 4px; color: var(--secondary); font-size: 12px; line-height: 1.65; }
       .input-dialog .box .hint.warn { color: var(--danger); }
 
+      /* ── 导出弹窗 ── */
+      .export-dialog .box { width: 420px; }
+      .export-dialog .export-note {
+        margin: 0 0 12px; color: var(--muted); font-size: 11.5px; line-height: 1.65;
+      }
+      .export-dialog .export-actions { display: flex; flex-direction: column; gap: 6px; }
+      .export-dialog .export-actions button {
+        display: flex; align-items: center; gap: 8px;
+        width: 100%; text-align: left;
+        border: 1px solid var(--border-strong); border-radius: 8px;
+        padding: 8px 12px; background: transparent; color: var(--fg);
+        font-size: 12.5px;
+      }
+      .export-dialog .export-actions button:hover:not(:disabled) {
+        background: var(--hover); border-color: var(--accent);
+      }
+      .export-dialog .export-actions button:disabled { opacity: .45; cursor: default; }
+      .export-dialog .export-actions .sub {
+        display: block; margin-top: 2px; color: var(--faint); font-size: 11px;
+      }
+      .export-dialog .export-option {
+        display: flex; align-items: center; gap: 6px;
+        margin-top: 12px; color: var(--secondary); font-size: 12px; cursor: pointer;
+      }
+      .export-dialog .export-option input { margin: 0; accent-color: var(--accent); }
+
       /* ── 问答抽屉 ── */
       .ask-panel {
         flex: 0 0 auto;
@@ -642,6 +670,8 @@
         pointer-events: auto;
       }
       .toast[data-level="error"] { border-color: color-mix(in oklab, var(--danger) 45%, transparent); color: var(--danger); }
+      /* 与状态栏的 warn 语义保持一致：都属于「要留意」，沿用 danger 色 */
+      .toast[data-level="warn"] { border-color: color-mix(in oklab, var(--danger) 45%, transparent); color: var(--danger); }
       /* 带「撤销」按钮的提示条：正文与按钮横排 */
       .toast .toast-row { display: flex; align-items: center; gap: 10px; }
       .toast .toast-action {
@@ -703,6 +733,7 @@
               <button class="tab" data-mode="preview">预览</button>
             </div>
             <button class="btn" id="btnOutline" title="显示 / 隐藏大纲" disabled>大纲</button>
+            <button class="btn" id="btnExport" title="导出 Markdown / HTML" disabled>导出</button>
             <button class="btn" id="btnSave" disabled>保存</button>
             <button class="btn danger" id="btnDelete" title="删除这篇笔记" disabled>删除</button>
           </div>
@@ -783,6 +814,29 @@
         <div class="actions">
           <button class="btn" id="logoutCancel">取消</button>
           <button class="btn danger" id="logoutOk">退出登录</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导出 -->
+    <div class="input-dialog export-dialog" id="exportDialog" hidden>
+      <div class="box">
+        <h3>导出笔记</h3>
+        <p class="export-note" id="exportNote"></p>
+        <div class="export-actions">
+          <button id="exportMdCopy">
+            <span>复制 Markdown 源码<span class="sub">纯文本，粘到任何编辑器里保存为 .md</span></span>
+          </button>
+          <button id="exportHtmlCopy">
+            <span>复制 HTML<span class="sub">自包含单文件（样式、代码高亮、公式字体均已内联），粘到 .html 里即可离线打开</span></span>
+          </button>
+        </div>
+        <label class="export-option">
+          <input type="checkbox" id="exportDark" />
+          <span>使用深色配色</span>
+        </label>
+        <div class="actions">
+          <button class="btn" id="exportCancel">关闭</button>
         </div>
       </div>
     </div>
@@ -1220,13 +1274,28 @@
         };
 
         const setEnabled = (on) => {
-          for (const id of ["btnNew", "btnSync", "search", "btnNewFolder", "btnOutline"]) {
+          for (const id of ["btnNew", "btnSync", "search", "btnNewFolder"]) {
             const el = $(id);
             if (el) el.disabled = !on;
           }
           $("btnAsk").disabled = !on;
           // 没登录就没什么可退的
           $("btnLogout").disabled = !on;
+          // 大纲/导出除了要登录，还得真的选中了一篇笔记 —— 统一交给它判断，
+          // 否则 refreshStatus 的 setEnabled(true) 会把 renderEditor 刚置灰的按钮又点亮
+          syncActionButtons();
+        };
+
+        /**
+         * 同步「依赖当前是否选中笔记」的按钮状态。
+         *
+         * 这里是唯一判定处：登录态变化（setEnabled）与笔记切换（renderEditor）
+         * 都会走到它，两边不再各写一份，也就不会再出现互相覆盖的时序 bug。
+         */
+        const syncActionButtons = () => {
+          const hasNote = state.loggedIn && state.draft.id !== null;
+          $("btnOutline").disabled = !hasNote;
+          $("btnExport").disabled = !hasNote;
         };
 
         // ── 登录 ────────────────────────────────────────────────────────────
@@ -1349,6 +1418,7 @@
           $("search").value = "";
           $("titleInput").value = "";
           $("savedHint").textContent = "";
+          $("exportDialog").hidden = true;
           noteNodes.clear();
           $("folderSelect").textContent = "";
           renderNotes();
@@ -1978,7 +2048,7 @@
           stopOutlineWatch();
           const headings = window.MiNoteOutline.extract(state.draft.markdown || "");
           renderOutline(headings);
-          $("btnOutline").disabled = state.draft.id === null;
+          syncActionButtons();
 
           // 预览模式才有可联动的 DOM；编辑模式只有源码
           if (state.mode !== "preview" || $("outline").hidden) return;
@@ -2066,6 +2136,91 @@
           }
         };
 
+        /*
+         * ── 导出 ────────────────────────────────────────────────────────────
+         *
+         * 走剪贴板而不是写文件：宿主没有「另存为」对话框，落地到文件需要
+         * fs.read（选目录）+ fs.write（写文件）两个权限，而本项目对外承诺
+         * 「不读也不写你的工作区文件」。所以导出 = 生成内容 → 剪贴板 / 浏览器下载。
+         *
+         * 复制大段文本走插件进程（mn.clipboard.write，与侧边栏「复制全文」同一条路），
+         * 因为视图是 file:// 沙箱页，navigator.clipboard 不保证可用。
+         */
+        const openExportDialog = () => {
+          if (state.draft.id === null) return;
+          const title = state.draft.title || "无标题笔记";
+          const chars = (state.draft.markdown || "").length;
+          // 导出只能落到剪贴板（面板没有文件写入权限），所以把建议文件名一并给出，
+          // 用户粘完就知道该存成什么名字。
+          const mdName = window.MiNoteExport.suggestFileName(title, "md");
+          const htmlName = window.MiNoteExport.suggestFileName(title, "html");
+          const images = window.MiNoteExport.countAttachments(state.draft.markdown);
+          $("exportNote").textContent =
+            `「${title}」 · 正文 ${chars} 字` +
+            (images ? ` · ${images} 张图片` : "") +
+            ` · 建议存为 ${mdName} / ${htmlName}`;
+          $("exportDialog").hidden = false;
+        };
+
+        const closeExportDialog = () => {
+          $("exportDialog").hidden = true;
+        };
+
+        $("btnExport").addEventListener("click", openExportDialog);
+        $("exportCancel").addEventListener("click", closeExportDialog);
+        $("exportDialog").addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeExportDialog();
+        });
+
+        $("exportMdCopy").addEventListener("click", async () => {
+          const text = state.draft.markdown || "";
+          if (!text.trim()) {
+            toast("这篇笔记还没有正文", "error");
+            return;
+          }
+          const res = await invoke("mn.clipboard.write", { text });
+          if (!res.ok) {
+            toast(res.error || "复制失败", "error");
+            return;
+          }
+          closeExportDialog();
+          toast(`已复制 Markdown（${res.length} 字）`);
+        });
+
+        $("exportHtmlCopy").addEventListener("click", async () => {
+          // 生成含字体内联的 HTML 要拼几百 KB 字符串，按钮先禁用防连点
+          const button = $("exportHtmlCopy");
+          button.disabled = true;
+          try {
+            const theme = $("exportDark").checked ? "dark" : "light";
+            // 传取图函数：导出文件是离开本机/离开小米云后看的，
+            // 留着 data-file-id 骨架等于导出后图片全空
+            const html = await window.MiNoteExport.toHtml(
+              state.draft.title,
+              state.draft.markdown,
+              { theme, resolveImage: fetchAttachmentDataUri },
+            );
+            const res = await invoke("mn.clipboard.write", { text: html });
+            if (!res.ok) {
+              toast(res.error || "复制失败", "error");
+              return;
+            }
+            const pending = window.MiNoteExport.countAttachments(state.draft.markdown) -
+              (html.match(/class="md-attachment is-loaded"/g) || []).length;
+            closeExportDialog();
+            toast(
+              pending > 0
+                ? `已复制 HTML（${window.MiNoteExport.describe(html)}）· ${pending} 张图片未取回`
+                : `已复制 HTML（${window.MiNoteExport.describe(html)}）`,
+              pending > 0 ? "warn" : "info",
+            );
+          } catch (error) {
+            toast(`生成 HTML 失败：${error?.message ?? error}`, "error");
+          } finally {
+            button.disabled = false;
+          }
+        });
+
         const renderEditor = () => {
           const body = $("editorBody");
           body.textContent = "";
@@ -2083,12 +2238,15 @@
             $("titleInput").disabled = true;
             $("btnDelete").disabled = true;
             $("btnSave").disabled = true;
+            $("exportDialog").hidden = true;
+            syncActionButtons();
             return;
           }
 
           $("tabs").hidden = false;
           $("titleInput").disabled = false;
           $("btnDelete").disabled = false;
+          syncActionButtons();
           // 工具栏只在编辑模式有意义（预览模式下没有可操作的选区）
           $("editorTools").hidden = state.mode !== "edit";
 
