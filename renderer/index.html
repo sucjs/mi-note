@@ -43,6 +43,7 @@
     <script src="vendor/katex/katex.min.js"></script>
     <script src="lib/markdown.js"></script>
     <script src="lib/editor.js"></script>
+    <script src="lib/outline.js"></script>
     <style>
       :root {
         color-scheme: dark;
@@ -390,6 +391,43 @@
       }
 
       .editor-body { flex: 1; min-height: 0; display: flex; }
+
+      /*
+       * 正文区 + 大纲：横向排列。
+       * 大纲放在正文右侧而不是左侧 —— 左侧已经是笔记列表，
+       * 再放一栏会让正文被挤得很窄。
+       */
+      .editor-main { flex: 1; min-height: 0; display: flex; }
+      .outline {
+        flex: 0 0 auto; width: 190px; min-width: 0;
+        border-left: 1px solid var(--border);
+        background: var(--surface);
+        overflow: auto; padding: 10px 4px 20px;
+      }
+      .outline[hidden] { display: none; }
+      .outline .outline-title {
+        padding: 0 10px 6px; color: var(--faint);
+        font-size: 11px; letter-spacing: .02em;
+      }
+      .outline .outline-empty {
+        padding: 0 10px; color: var(--faint); font-size: 11.5px; line-height: 1.6;
+      }
+      .outline .outline-item {
+        display: block; width: 100%; text-align: left;
+        border: 0; border-radius: 5px;
+        padding: 3px 10px; background: transparent;
+        color: var(--muted); font-size: 12px; line-height: 1.45;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .outline .outline-item:hover { background: var(--hover); color: var(--fg); }
+      .outline .outline-item[data-active="true"] { color: var(--accent); font-weight: 600; }
+      /* 按层级缩进，让结构一眼能看出来 */
+      .outline .outline-item[data-level="2"] { padding-left: 20px; }
+      .outline .outline-item[data-level="3"] { padding-left: 30px; }
+      .outline .outline-item[data-level="4"] { padding-left: 40px; }
+      .outline .outline-item[data-level="5"] { padding-left: 50px; }
+      /* 窄窗口下大纲会挤掉正文，先让位 */
+      @media (max-width: 860px) { .outline { width: 150px; } }
       .md-input {
         flex: 1; min-width: 0;
         border: 0; padding: 14px 18px 48px;
@@ -431,6 +469,16 @@
       .md-body table { border-collapse: collapse; margin: .8em 0; font-size: .95em; }
       .md-body th, .md-body td { border: 1px solid var(--border-strong); padding: 4px 10px; }
       .md-body th { background: color-mix(in oklab, var(--fg) 5%, transparent); }
+
+      /* 搜索命中高亮：列表项与正文都用同一个标记 */
+      mark.search-hit {
+        border-radius: 3px; padding: 0 1px;
+        background: color-mix(in oklab, var(--accent) 32%, transparent);
+        color: inherit;
+      }
+      mark.search-hit.is-current {
+        background: var(--accent); color: #fff;
+      }
 
       /* ── 任务列表（markdown-it-task-lists） ── */
       .md-body .task-list-item { list-style: none; margin-left: -1.35em; }
@@ -654,6 +702,7 @@
               <button class="tab" data-mode="edit">编辑</button>
               <button class="tab" data-mode="preview">预览</button>
             </div>
+            <button class="btn" id="btnOutline" title="显示 / 隐藏大纲" disabled>大纲</button>
             <button class="btn" id="btnSave" disabled>保存</button>
             <button class="btn danger" id="btnDelete" title="删除这篇笔记" disabled>删除</button>
           </div>
@@ -681,11 +730,18 @@
             <button class="tool" data-cmd="codeblock" title="代码块">▤ 代码块</button>
             <button class="tool" data-cmd="table" title="表格">▦ 表格</button>
           </div>
-          <div class="editor-body" id="editorBody">
-            <div class="empty" id="editorEmpty">
-              <div class="big">选择一篇笔记</div>
-              <div class="small">从左侧列表点开一篇即可阅读与编辑。也可以直接点右上角「新建」写一篇新的。</div>
+          <div class="editor-main">
+            <div class="editor-body" id="editorBody">
+              <div class="empty" id="editorEmpty">
+                <div class="big">选择一篇笔记</div>
+                <div class="small">从左侧列表点开一篇即可阅读与编辑。也可以直接点右上角「新建」写一篇新的。</div>
+              </div>
             </div>
+            <!-- 大纲：H1–H5，点击跳转，滚动联动高亮 -->
+            <aside class="outline" id="outline" hidden>
+              <div class="outline-title">大纲</div>
+              <div id="outlineList"></div>
+            </aside>
           </div>
         </section>
       </div>
@@ -1164,7 +1220,7 @@
         };
 
         const setEnabled = (on) => {
-          for (const id of ["btnNew", "btnSync", "search", "btnNewFolder"]) {
+          for (const id of ["btnNew", "btnSync", "search", "btnNewFolder", "btnOutline"]) {
             const el = $(id);
             if (el) el.disabled = !on;
           }
@@ -1411,14 +1467,59 @@
           if (node.textContent !== value) node.textContent = value;
         };
 
+        /**
+         * 把命中的关键词包成 <mark>。
+         *
+         * 用 DOM 节点而不是 innerHTML：标题与摘要都来自云端，直接拼 HTML 等于
+         * 让笔记内容变成注入点。这里先按关键词切段，再逐个建文本节点与 mark。
+         *
+         * @param {HTMLElement} node
+         * @param {string} value 原始文本
+         * @param {string} query 搜索词（空则不处理）
+         */
+        const setHighlightedText = (node, value, query) => {
+          const text = String(value ?? "");
+          const needle = String(query || "").trim();
+
+          if (!needle) {
+            if (node.childNodes.length === 1 && node.firstChild.nodeType === 3) {
+              setText(node, text);
+              return;
+            }
+            node.textContent = text;
+            return;
+          }
+
+          // 已是纯文本且内容一致就跳过（自动保存会频繁调用，别每次都重建节点）
+          if (node.dataset.raw === text && node.dataset.query === needle) return;
+
+          node.textContent = "";
+          const lower = text.toLowerCase();
+          const lowerNeedle = needle.toLowerCase();
+          let from = 0;
+          let at = lower.indexOf(lowerNeedle);
+          while (at !== -1) {
+            if (at > from) node.appendChild(document.createTextNode(text.slice(from, at)));
+            const mark = document.createElement("mark");
+            mark.className = "search-hit";
+            mark.textContent = text.slice(at, at + needle.length);
+            node.appendChild(mark);
+            from = at + needle.length;
+            at = lower.indexOf(lowerNeedle, from);
+          }
+          if (from < text.length) node.appendChild(document.createTextNode(text.slice(from)));
+          node.dataset.raw = text;
+          node.dataset.query = needle;
+        };
+
         const updateNoteNode = (entry, note) => {
-          setText(entry.title, note.title || "无标题笔记");
+          setHighlightedText(entry.title, note.title || "无标题笔记", state.query);
           setText(entry.time, formatTime(note.modifyDate));
           const folderText = note.folderName ? `· ${note.folderName}` : "";
           setText(entry.folder, folderText);
           entry.folder.hidden = !folderText;
           const summaryText = note.summary || "";
-          setText(entry.summary, summaryText);
+          setHighlightedText(entry.summary, summaryText, state.query);
           entry.summary.hidden = !summaryText;
           const selected = String(note.id === state.selectedId);
           if (entry.el.dataset.selected !== selected) entry.el.dataset.selected = selected;
@@ -1560,6 +1661,12 @@
           searchTimer = setTimeout(async () => {
             state.query = value.trim();
             await loadNotes();
+            /*
+             * 列表高亮由 updateNoteNode 处理，但正文里的高亮是渲染时插进 DOM 的，
+             * 不会自己消失 —— 不清掉的话清空搜索后正文仍留着上一次的 <mark>。
+             * 编辑模式没有可清的 DOM（纯 textarea），跳过即可。
+             */
+            if (state.mode === "preview") renderEditor();
           }, 250);
         });
 
@@ -1750,6 +1857,215 @@
          */
         $("editorTools").addEventListener("mousedown", (event) => event.preventDefault());
 
+        /*
+         * ── 大纲 ────────────────────────────────────────────────────────────
+         *
+         * 提取逻辑在 lib/outline.js（纯函数，便于单测）。这里负责：
+         *   - 把标题渲染成可点的列表
+         *   - 预览模式：给标题补 id + IntersectionObserver 滚动联动
+         *   - 编辑模式：点击后把光标移到源码里那一行
+         *
+         * 「跳到源码第几行」靠 extract() 给出的标题序号，与 markdown-it 的渲染顺序
+         * 一一对应；所以编辑模式只需要按序号数到第 N 个 `#` 行即可。
+         */
+        let outlineUnwatch = null;
+        /*
+         * 点击大纲项后会平滑滚动，而滚动联动同时也在更新高亮 ——
+         * 两者会打架：刚点的第 5 项，滚动一停下就被联动改成了第 6 项。
+         * 用一个短暂的抑制窗口：跳转期间以用户的点击为准。
+         */
+        let outlineJumpUntil = 0;
+
+        const stopOutlineWatch = () => {
+          if (outlineUnwatch) {
+            outlineUnwatch();
+            outlineUnwatch = null;
+          }
+        };
+
+        /** 点击大纲项：预览模式滚过去，编辑模式把光标移到那一行。 */
+        const jumpToHeading = (index) => {
+          // 跳转期间让点击结果压过滚动联动
+          outlineJumpUntil = Date.now() + 800;
+          setActiveHeading(index);
+
+          if (state.mode === "preview") {
+            const target = document.getElementById(window.MiNoteOutline.headingId(index));
+            const scroller = $("editorBody").querySelector(".md-view");
+            if (target && scroller) {
+              /*
+               * 自己算滚动位置而不是用 scrollIntoView：
+               * 后者会挑「最近的滚动祖先」，在 flex 布局里可能选中 body，
+               * 结果 .md-view 的 scrollTop 纹丝不动（实测过）。
+               *
+               * 用瞬时滚动而不是 smooth：长文里平滑动画要一秒多才停，
+               * 点目录是导航动作，立刻到位比看得见动画更重要。
+               */
+              const top = target.offsetTop - scroller.offsetTop;
+              scroller.scrollTop = Math.max(0, top - 8);
+            }
+            return;
+          }
+          // 编辑模式：在源码里数到第 index 个标题行
+          const textarea = document.querySelector(".md-input");
+          if (!textarea) return;
+          const lines = textarea.value.split("\n");
+          let seen = 0;
+          let fence = null;
+          for (let i = 0; i < lines.length; i += 1) {
+            const fenceMatch = lines[i].match(/^\s*(```|~~~)/);
+            if (fenceMatch) {
+              if (fence === null) fence = fenceMatch[1];
+              else if (fence === fenceMatch[1]) fence = null;
+              continue;
+            }
+            if (fence !== null) continue;
+            if (!/^#{1,5}\s+/.test(lines[i])) continue;
+            if (seen === index) {
+              // 算出该行行首的绝对偏移
+              let offset = 0;
+              for (let k = 0; k < i; k += 1) offset += lines[k].length + 1;
+              textarea.focus();
+              textarea.setSelectionRange(offset, offset + lines[i].length);
+              // 让选中行滚到可视区中间
+              const lineHeight = 21;
+              textarea.scrollTop = Math.max(0, i * lineHeight - textarea.clientHeight / 2);
+              return;
+            }
+            seen += 1;
+          }
+        };
+
+        const renderOutline = (headings) => {
+          const box = $("outlineList");
+          const panel = $("outline");
+          if (!panel.hidden) box.textContent = "";
+
+          if (!headings.length) {
+            if (panel.hidden) return;
+            const empty = document.createElement("div");
+            empty.className = "outline-empty";
+            empty.textContent = state.mode === "edit"
+              ? "正文里还没有标题。用「# 」开头写一行即可。"
+              : "这篇笔记没有标题。";
+            box.appendChild(empty);
+            return;
+          }
+
+          if (panel.hidden) return;
+          for (const heading of headings) {
+            const item = document.createElement("button");
+            item.className = "outline-item";
+            item.dataset.level = String(heading.level);
+            item.dataset.index = String(heading.index);
+            item.title = heading.text;
+            item.textContent = heading.text;
+            item.addEventListener("click", () => jumpToHeading(heading.index));
+            box.appendChild(item);
+          }
+        };
+
+        /** 高亮大纲里当前所在的那一条。 */
+        const setActiveHeading = (index) => {
+          const items = $("outlineList").querySelectorAll(".outline-item");
+          for (const item of items) {
+            const active = String(item.dataset.index === String(index));
+            if (item.dataset.active !== active) item.dataset.active = active;
+          }
+        };
+
+        const refreshOutline = () => {
+          stopOutlineWatch();
+          const headings = window.MiNoteOutline.extract(state.draft.markdown || "");
+          renderOutline(headings);
+          $("btnOutline").disabled = state.draft.id === null;
+
+          // 预览模式才有可联动的 DOM；编辑模式只有源码
+          if (state.mode !== "preview" || $("outline").hidden) return;
+          const md = $("editorBody").querySelector(".md-body");
+          if (!md) return;
+          const nodes = window.MiNoteOutline.decorate(md);
+          outlineUnwatch = window.MiNoteOutline.watchScroll(
+            $("editorBody").querySelector(".md-view"),
+            nodes,
+            (index) => {
+              // 刚点过大纲就别让联动抢走高亮
+              if (Date.now() < outlineJumpUntil) return;
+              setActiveHeading(index);
+            },
+          );
+        };
+
+        $("btnOutline").addEventListener("click", () => {
+          const panel = $("outline");
+          panel.hidden = !panel.hidden;
+          $("btnOutline").dataset.active = String(!panel.hidden);
+          refreshOutline();
+        });
+
+        /**
+         * 在渲染后的正文里高亮搜索词，并把首个命中滚进视野。
+         *
+         * 只在预览模式做：编辑模式是纯 textarea，没有可标记的 DOM，
+         * 硬要跳转还会打乱用户正在输入的光标位置。
+         */
+        const highlightInBody = (root) => {
+          if (!root || !state.query) return;
+          const needle = state.query.trim();
+          if (!needle) return;
+          const lower = needle.toLowerCase();
+
+          // 收集文本节点（跳过代码块内部：那里高亮会打乱等宽排版，也没必要）
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+            acceptNode: (node) => {
+              if (!node.nodeValue || !node.nodeValue.toLowerCase().includes(lower)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (node.parentNode && node.parentNode.closest("pre, code, mark")) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            },
+          });
+
+          const targets = [];
+          while (walker.nextNode()) targets.push(walker.currentNode);
+
+          let first = null;
+          for (const node of targets) {
+            const text = node.nodeValue;
+            const fragment = document.createDocumentFragment();
+            let from = 0;
+            let at = text.toLowerCase().indexOf(lower);
+            while (at !== -1) {
+              if (at > from) fragment.appendChild(document.createTextNode(text.slice(from, at)));
+              const mark = document.createElement("mark");
+              mark.className = "search-hit";
+              if (!first) {
+                mark.classList.add("is-current");
+                first = mark;
+              }
+              mark.textContent = text.slice(at, at + needle.length);
+              fragment.appendChild(mark);
+              from = at + needle.length;
+              at = text.toLowerCase().indexOf(lower, from);
+            }
+            if (from < text.length) fragment.appendChild(document.createTextNode(text.slice(from)));
+            node.parentNode.replaceChild(fragment, node);
+          }
+
+          // 滚到第一处命中（瞬时：长文里 smooth 要一秒多才停）
+          if (first) {
+            const scroller = root.closest(".md-view");
+            if (scroller) {
+              const top = first.offsetTop - scroller.offsetTop;
+              scroller.scrollTop = Math.max(0, top - scroller.clientHeight / 3);
+            } else {
+              first.scrollIntoView({ block: "center" });
+            }
+          }
+        };
+
         const renderEditor = () => {
           const body = $("editorBody");
           body.textContent = "";
@@ -1823,7 +2139,11 @@
              * 这里再把它换成真的 data URI。取不到就降级为文本提示，不显示破图。
              */
             void window.MiNoteMarkdown.hydrate(md, fetchAttachmentDataUri);
+            // 有搜索词时把命中标出来，并滚到第一处
+            highlightInBody(md);
           }
+          // 正文换了，大纲要跟着换（含给预览标题补 id 以支持滚动联动）
+          refreshOutline();
         };
 
         for (const tab of document.querySelectorAll(".tab")) {

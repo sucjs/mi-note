@@ -38,6 +38,10 @@ back after signing in again. The current version number is shown in the same cor
 at the top of the list pane, leaving vertical space for notes. Light/dark follows the host theme.
 
 **Note management** — browse, search (title and body), create, edit (Markdown with preview), delete.
+Search hits are **highlighted** in both the list and the body, and the view scrolls to the first match.
+
+**Outline** — a toggleable H1–H5 table of contents beside the body. The current section is
+highlighted as you scroll, and clicking an entry jumps to it.
 
 **Markdown preview** — headings, tables, nested lists, task lists, quotes, code blocks with
 **syntax highlighting**, math (KaTeX, inline `$…$` and block `$$…$$`), images, underline and
