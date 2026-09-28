@@ -2743,7 +2743,19 @@
           setInterval(async () => {
             if (state.jobs.size) return;
             const res = await invoke("mn.status");
-            if (res.ok) await refreshStatus(res.status);
+            if (!res.ok) return;
+            /*
+             * 状态显示「登录已失效」时顺手探活一次。
+             *
+             * 失效可能只是一次网络抖动（掉线、公司 WiFi 登录网关、代理拦截）
+             * 造成的误判，而唯一的清除路径就是走一次 ensureSession ——
+             * 以前面板从不调它，于是一次抖动就会让状态栏一直挂着
+             * 「登录已失效，请重新扫码」，直到用户碰巧做了别的操作。
+             * 这里每轮只试一次，成功了状态自然回到正常。
+             */
+            if (res.status && res.status.needLogin) await invoke("mn.session.ensure");
+            const next = await invoke("mn.status");
+            if (next.ok) await refreshStatus(next.status);
           }, 20000);
         })();
 
