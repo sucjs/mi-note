@@ -10,7 +10,7 @@
 
 ## 安装
 
-从本仓库下载 [`dist/pi.mi-note-0.1.1.piplug`](dist/pi.mi-note-0.1.1.piplug)，
+从本仓库dist下载，
 在 PI-Desktop 插件页安装即可。也可以从 [Releases](../../releases) 下载。
 
 ## 使用

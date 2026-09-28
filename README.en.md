@@ -11,8 +11,8 @@ and let AI read and write them directly.
 
 ## Install
 
-Download [`dist/pi.mi-note-0.1.1.piplug`](dist/pi.mi-note-0.1.1.piplug) from this repo
-and install it from the PI-Desktop plugins page. Also available under [Releases](../../releases).
+
+install it from the PI-Desktop plugins page. Also available under [Releases](../../releases).
 
 ## Getting started
 
