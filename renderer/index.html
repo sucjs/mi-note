@@ -595,25 +595,35 @@
         margin: 0 0 12px; color: var(--muted); font-size: 11.5px; line-height: 1.65;
       }
       .export-dialog .export-actions { display: flex; flex-direction: column; gap: 6px; }
+      /* 每个导出方式是一张卡片：主体是按钮，附加选项嵌在卡片内部 */
+      .export-dialog .export-action {
+        border: 1px solid var(--border-strong); border-radius: 8px;
+        background: transparent; overflow: hidden;
+      }
+      .export-dialog .export-action:hover { border-color: var(--accent); }
       .export-dialog .export-actions button {
         display: flex; align-items: center; gap: 8px;
         width: 100%; text-align: left;
-        border: 1px solid var(--border-strong); border-radius: 8px;
-        padding: 8px 12px; background: transparent; color: var(--fg);
+        border: 0; padding: 8px 12px; background: transparent; color: var(--fg);
         font-size: 12.5px;
       }
-      .export-dialog .export-actions button:hover:not(:disabled) {
-        background: var(--hover); border-color: var(--accent);
-      }
+      .export-dialog .export-actions button:hover:not(:disabled) { background: var(--hover); }
       .export-dialog .export-actions button:disabled { opacity: .45; cursor: default; }
       .export-dialog .export-actions .sub {
         display: block; margin-top: 2px; color: var(--faint); font-size: 11px;
       }
+      /* 深色配色只影响 HTML 导出，所以嵌在「复制 HTML」卡片里 */
       .export-dialog .export-option {
         display: flex; align-items: center; gap: 6px;
-        margin-top: 12px; color: var(--secondary); font-size: 12px; cursor: pointer;
+        border-top: 1px solid var(--border);
+        padding: 6px 12px;
+        color: var(--secondary); font-size: 11.5px; cursor: pointer;
       }
-      .export-dialog .export-option input { margin: 0; accent-color: var(--accent); }
+      .export-dialog .export-option:hover { background: var(--hover); }
+      /* width:auto 必须显式写：.input-dialog .box input 的 width:100% 会把复选框拉满整行 */
+      .export-dialog .export-option input {
+        width: auto; margin: 0; flex: 0 0 auto; accent-color: var(--accent);
+      }
 
       /* ── 问答抽屉 ── */
       .ask-panel {
@@ -824,17 +834,21 @@
         <h3>导出笔记</h3>
         <p class="export-note" id="exportNote"></p>
         <div class="export-actions">
-          <button id="exportMdCopy">
-            <span>复制 Markdown 源码<span class="sub">纯文本，粘到任何编辑器里保存为 .md</span></span>
-          </button>
-          <button id="exportHtmlCopy">
-            <span>复制 HTML<span class="sub">自包含单文件（样式、代码高亮、公式字体均已内联），粘到 .html 里即可离线打开</span></span>
-          </button>
+          <div class="export-action">
+            <button id="exportMdCopy">
+              <span>复制 Markdown 源码<span class="sub">纯文本，粘到任何编辑器里保存为 .md</span></span>
+            </button>
+          </div>
+          <div class="export-action">
+            <button id="exportHtmlCopy">
+              <span>复制 HTML<span class="sub">自包含单文件（样式、代码高亮、公式字体均已内联），粘到 .html 里即可离线打开</span></span>
+            </button>
+            <label class="export-option">
+              <input type="checkbox" id="exportDark" />
+              <span>使用深色配色</span>
+            </label>
+          </div>
         </div>
-        <label class="export-option">
-          <input type="checkbox" id="exportDark" />
-          <span>使用深色配色</span>
-        </label>
         <div class="actions">
           <button class="btn" id="exportCancel">关闭</button>
         </div>
