@@ -567,7 +567,11 @@
             <input class="title-input" id="titleInput" placeholder="无标题笔记" disabled />
             <span class="saved" id="savedHint"></span>
             <div class="tabs" id="tabs" hidden>
-              <button class="tab" data-mode="edit" data-active="true">编辑</button>
+              <!--
+                data-active 不在这里写死：它是 state.mode 的投影，由 syncTabs() 统一设置。
+                写死过 data-active="true" 的后果是首次打开时「编辑」高亮但渲染的是预览。
+              -->
+              <button class="tab" data-mode="edit">编辑</button>
               <button class="tab" data-mode="preview">预览</button>
             </div>
             <button class="btn" id="btnSave" disabled>保存</button>
@@ -865,6 +869,11 @@
           query: "",
           selectedId: null,
           draft: { id: null, title: "", markdown: "", dirty: false },
+          /*
+           * 编辑 / 预览。这是标签高亮与正文渲染的**唯一**事实来源：
+           * syncTabs() 把高亮派生自它，renderEditor() 按它渲染正文。
+           * 默认 preview：点开一篇先看内容，比直接进编辑更符合阅读场景。
+           */
           mode: "preview",
           /*
            * 已「乐观删除」但尚未真正提交的笔记 id。
@@ -1490,10 +1499,26 @@
           ta.scrollTop = snapshot.scrollTop;
         };
 
+        /*
+         * 把标签高亮同步成 state.mode 的样子。
+         *
+         * 必须单向派生：以前 HTML 里写死 data-active="true"，而 state.mode 默认是
+         * "preview"，两个事实来源各说各话 —— 首次打开面板就会「编辑高亮、内容却是预览」。
+         * 更麻烦的是点「预览」时因为 mode 已经是 preview，处理函数直接 return，
+         * 高亮连纠正的机会都没有。现在只有 state.mode 一个源头。
+         */
+        const syncTabs = () => {
+          for (const tab of document.querySelectorAll(".tab")) {
+            tab.dataset.active = String(tab.dataset.mode === state.mode);
+          }
+        };
+
         const renderEditor = () => {
           const body = $("editorBody");
           body.textContent = "";
           const note = state.draft;
+          // 内容与高亮同源：先对齐标签，再渲染正文，两者不可能再分叉
+          syncTabs();
 
           if (note.id === null) {
             const empty = document.createElement("div");
@@ -1567,9 +1592,7 @@
               state.pendingEditorView = captureEditorView();
             }
             state.mode = tab.dataset.mode;
-            for (const other of document.querySelectorAll(".tab")) {
-              other.dataset.active = String(other === tab);
-            }
+            syncTabs();
             renderEditor();
           });
         }
@@ -1716,9 +1739,6 @@
           await loadFolders();
           // 先切到编辑模式再打开，避免「打开（预览）→ 再切编辑」白渲染一次
           state.mode = "edit";
-          for (const tab of document.querySelectorAll(".tab")) {
-            tab.dataset.active = String(tab.dataset.mode === "edit");
-          }
           await openNote(res.note.id);
         });
 
