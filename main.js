@@ -24,6 +24,12 @@ let service = null;
 let lastActiveSurface = null;
 
 const PLUGIN_ID = "pi.mi-note";
+/*
+ * 版本号只从清单里取，不在这里再抄一份。
+ * 抄一份的代价是它会和 manifest 悄悄分叉（改清单忘了改这里），
+ * 面板上的版本与宿主看到的版本就不一致了。
+ */
+const PLUGIN_VERSION = require("./manifest.json").version;
 
 // ── 生命周期 ────────────────────────────────────────────────────────────────
 
@@ -466,7 +472,7 @@ async function handlePanelChannel(channel, payload) {
 
   switch (channel) {
     case "mn.ping":
-      return { ok: true, pluginId: PLUGIN_ID, version: "0.1.0" };
+      return { ok: true, pluginId: PLUGIN_ID, version: PLUGIN_VERSION };
 
     case "mn.status":
       return { ok: true, status: svc.status() };

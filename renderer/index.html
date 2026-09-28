@@ -172,6 +172,14 @@
       .status[data-state="warn"] .dot { background: var(--danger); }
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
+      /* 版本号：面板右上角，与清单里的 version 同源（由 mn.ping 回填） */
+      .version {
+        color: var(--faint); font-size: 11px; white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      /* 窄面板优先保按钮，版本号是最不重要的一条信息，先让位 */
+      @media (max-width: 700px) { .version { display: none; } }
+
       .btn {
         border: 1px solid var(--border-strong);
         border-radius: 7px;
@@ -190,6 +198,13 @@
       .btn.primary:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 86%, #000); color: #fff; }
       .btn.danger { color: var(--danger); }
       .btn.danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 14%, transparent); color: var(--danger); }
+      /* 退出登录：平时低调，悬停时才提示它是破坏性操作 */
+      .btn.logout { color: var(--muted); }
+      .btn.logout:hover:not(:disabled) {
+        color: var(--danger);
+        border-color: color-mix(in oklab, var(--danger) 40%, var(--border-strong));
+        background: color-mix(in oklab, var(--danger) 10%, transparent);
+      }
       .btn.icon { padding: 4px 7px; }
 
       /* ── 主体两栏（列表 + 正文，固定比例，不可拖动） ── */
@@ -440,6 +455,9 @@
         padding: 6px 10px; background: var(--bg); font-size: 13px;
       }
       .input-dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+      /* 退出登录确认：复用输入对话框的外观，多一行说明文字 */
+      .input-dialog .box .hint { margin: 0 0 4px; color: var(--secondary); font-size: 12px; line-height: 1.65; }
+      .input-dialog .box .hint.warn { color: var(--danger); }
 
       /* ── 问答抽屉 ── */
       .ask-panel {
@@ -522,9 +540,11 @@
             <span class="dot"></span><span id="statusText">正在检查登录状态…</span>
           </div>
           <div class="spacer"></div>
+          <span class="version" id="appVersion"></span>
           <button class="btn" id="btnAsk" disabled>AI 问答</button>
           <button class="btn" id="btnSync" disabled>同步</button>
           <button class="btn primary" id="btnNew" disabled>新建</button>
+          <button class="btn logout" id="btnLogout" title="退出登录小米账号" disabled>退出</button>
         </div>
       </header>
 
@@ -586,6 +606,19 @@
         <div class="actions">
           <button class="btn" id="inputDialogCancel">取消</button>
           <button class="btn primary" id="inputDialogOk">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 退出登录确认 -->
+    <div class="input-dialog" id="logoutDialog" hidden>
+      <div class="box">
+        <h3>退出登录？</h3>
+        <p class="hint">会清空本机保存的登录凭据与笔记缓存。云端笔记不会受影响，重新扫码登录后会自动同步回来。</p>
+        <p class="hint warn">本机尚未保存的草稿会一并丢弃。</p>
+        <div class="actions">
+          <button class="btn" id="logoutCancel">取消</button>
+          <button class="btn danger" id="logoutOk">退出登录</button>
         </div>
       </div>
     </div>
@@ -772,6 +805,44 @@
             field.addEventListener("keydown", onKey);
           });
 
+        /*
+         * 退出登录确认。
+         *
+         * 退出会清掉本机凭据与缓存，属于「不可逆但影响可控」的操作，
+         * 所以不静默执行。这里用自带弹窗而非 window.confirm：
+         * 无边框 Electron 窗口里的原生弹窗样式与面板完全脱节，而且会挡住拖拽区。
+         */
+        const confirmLogout = () =>
+          new Promise((resolve) => {
+            const dialog = $("logoutDialog");
+            const ok = $("logoutOk");
+            const cancel = $("logoutCancel");
+            dialog.hidden = false;
+            ok.focus();
+
+            const cleanup = () => {
+              dialog.hidden = true;
+              ok.removeEventListener("click", onOk);
+              cancel.removeEventListener("click", onCancel);
+              dialog.removeEventListener("keydown", onKey);
+            };
+            const finish = (value) => {
+              cleanup();
+              resolve(value);
+            };
+            const onOk = () => finish(true);
+            const onCancel = () => finish(false);
+            const onKey = (event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                finish(false);
+              }
+            };
+            ok.addEventListener("click", onOk);
+            cancel.addEventListener("click", onCancel);
+            dialog.addEventListener("keydown", onKey);
+          });
+
         const formatTime = (ts) => {
           const n = Number(ts);
           if (!n) return "";
@@ -935,6 +1006,8 @@
             if (el) el.disabled = !on;
           }
           $("btnAsk").disabled = !on;
+          // 没登录就没什么可退的
+          $("btnLogout").disabled = !on;
         };
 
         // ── 登录 ────────────────────────────────────────────────────────────
@@ -1028,6 +1101,64 @@
           hideLogin();
           await invoke("mn.login.cancel");
           if (!state.loggedIn) setStatus("尚未登录", "warn");
+        });
+
+        // ── 退出登录 ────────────────────────────────────────────────────────
+        /*
+         * 把面板恢复成「未登录」状态。
+         *
+         * 退出后不能只把状态文字改掉：列表节点、下拉选项、编辑器内容、
+         * 待删集合、光标快照全都是上一账号的数据，必须一并清干净，
+         * 否则新账号登录前会看到别人的笔记残影。
+         */
+        const resetWorkspace = () => {
+          cancelAutosave();
+          if (pendingDeleteTimer) {
+            clearTimeout(pendingDeleteTimer);
+            pendingDeleteTimer = null;
+          }
+          state.pendingDelete.clear();
+          state.folders = [];
+          state.notes = [];
+          state.total = 0;
+          state.query = "";
+          state.selectedId = null;
+          state.draft = { id: null, title: "", markdown: "", dirty: false };
+          state.pendingEditorView = null;
+          state.composing = false;
+          state.folderId = "0";
+          $("search").value = "";
+          $("titleInput").value = "";
+          $("savedHint").textContent = "";
+          noteNodes.clear();
+          $("folderSelect").textContent = "";
+          renderNotes();
+          renderEditor();
+        };
+
+        $("btnLogout").addEventListener("click", async () => {
+          if (!state.loggedIn) return;
+          if (!(await confirmLogout())) return;
+
+          // 先把未保存的草稿冲下去：即使马上要清缓存，也不该以「丢数据」收场
+          await flushSave();
+
+          const res = await invoke("mn.logout");
+          if (!res.ok) {
+            toast(res.error || "退出登录失败", "error");
+            return;
+          }
+
+          // 先置登录态再清面板：renderNotes 会据此走「尚未登录」空状态分支
+          state.loggedIn = false;
+          resetWorkspace();
+          setStatus("尚未登录", "warn");
+          setEnabled(false);
+          toast("已退出登录");
+
+          // 退出后直接把登录二维码摆到眼前，省得用户再找入口
+          showLogin();
+          await startLogin();
         });
 
         // ── 文件夹（重构后收进列表栏顶部的下拉框） ──────────────────────────
@@ -1130,23 +1261,40 @@
           if (entry.el.dataset.selected !== selected) entry.el.dataset.selected = selected;
         };
 
-        const renderEmptyState = (box) => {
+        const renderEmptyState = (box, override) => {
           const empty = document.createElement("div");
           empty.className = "empty";
           const big = document.createElement("div");
           big.className = "big";
-          big.textContent = state.query ? "没有匹配的笔记" : "这里还没有笔记";
+          big.textContent = override
+            ? override.big
+            : state.query
+              ? "没有匹配的笔记"
+              : "这里还没有笔记";
           const small = document.createElement("div");
           small.className = "small";
-          small.textContent = state.query
-            ? "换个关键词试试，或清空搜索框。"
-            : "点右上角「新建」写一篇，或在手机上记一条后点「同步」。";
+          small.textContent = override
+            ? override.small
+            : state.query
+              ? "换个关键词试试，或清空搜索框。"
+              : "点右上角「新建」写一篇，或在手机上记一条后点「同步」。";
           empty.append(big, small);
           box.appendChild(empty);
         };
 
         const renderNotes = () => {
           const box = $("noteList");
+
+          // 未登录时列表必然是空的：给一句解释，别留一片空白
+          if (!state.loggedIn) {
+            noteNodes.clear();
+            box.textContent = "";
+            renderEmptyState(box, {
+              big: "尚未登录",
+              small: "扫码登录后即可看到你的笔记。",
+            });
+            return;
+          }
 
           // 删除待删项（乐观删除，见 deleteNote）
           const visible = state.notes.filter((note) => !state.pendingDelete.has(String(note.id)));
@@ -1814,6 +1962,10 @@
 
         // ── 启动 ────────────────────────────────────────────────────────────
         (async () => {
+          // 版本号与清单同源：mn.ping 回的是 manifest.json 里的 version
+          void invoke("mn.ping").then((res) => {
+            if (res.ok && res.version) $("appVersion").textContent = `v${res.version}`;
+          });
           const status = (await invoke("mn.status")).status;
           await refreshStatus(status);
           if (!state.loggedIn) {

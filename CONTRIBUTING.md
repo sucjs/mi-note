@@ -40,7 +40,7 @@ tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
 ## 打包与校验
 
 ```bash
-node tools/pack.js mi-note     # → mi-note/dist/pi.mi-note-0.1.0.piplug
+node tools/pack.js mi-note     # → mi-note/dist/pi.mi-note-<版本>.piplug
 node tools/verify.js           # 校验产物（106 项）
 ```
 

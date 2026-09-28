@@ -11,7 +11,7 @@ and let AI read and write them directly.
 
 ## Install
 
-Download [`dist/pi.mi-note-0.1.0.piplug`](dist/pi.mi-note-0.1.0.piplug) from this repo
+Download [`dist/pi.mi-note-0.1.1.piplug`](dist/pi.mi-note-0.1.1.piplug) from this repo
 and install it from the PI-Desktop plugins page. Also available under [Releases](../../releases).
 
 ## Getting started
@@ -28,6 +28,10 @@ and install it from the PI-Desktop plugins page. Also available under [Releases]
 ## Features
 
 **QR sign-in** — confirm on your phone. The code is valid for 5 minutes; refresh it if it expires.
+
+**One-click sign-out** — "Sign out" in the top-right clears local credentials and cache after
+confirmation, and drops you straight back to the QR screen. Cloud notes are untouched and sync
+back after signing in again. The current version number is shown in the same corner.
 
 **Two-pane layout** — note list on the left, body on the right. Folders live in a dropdown
 at the top of the list pane, leaving vertical space for notes. Light/dark follows the host theme.
