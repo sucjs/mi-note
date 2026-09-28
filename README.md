@@ -11,7 +11,7 @@
 ## 安装
 
 从本仓库的 [`dist/`](dist) 目录下载最新的 `.piplug` 安装包
-（文件名形如 `pi.mi-note-<版本>.piplug`），在 PI-Desktop 插件页安装即可。
+（文件名形如 `local.mi-note-<版本>.piplug`），在 PI-Desktop 插件页安装即可。
 也可以从 [Releases](../../releases) 下载历史版本。
 
 ## 使用

@@ -42,7 +42,7 @@ tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
 
 ```bash
 node tools/embed-assets.js     # 改了 vendor 样式/字体后必须先跑（见下）
-node tools/pack.js mi-note     # → mi-note/dist/pi.mi-note-<版本>.piplug
+node tools/pack.js mi-note     # → mi-note/dist/local.mi-note-<版本>.piplug
 node tools/verify.js           # 校验产物
 ```
 

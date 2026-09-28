@@ -23,7 +23,7 @@ let service = null;
 /** 面板与侧边栏视图通过同一条 onPanelInvoke 进来，用面板来源区分事件订阅 */
 let lastActiveSurface = null;
 
-const PLUGIN_ID = "pi.mi-note";
+const PLUGIN_ID = "local.mi-note";
 /*
  * 版本号只从清单里取，不在这里再抄一份。
  * 抄一份的代价是它会和 manifest 悄悄分叉（改清单忘了改这里），

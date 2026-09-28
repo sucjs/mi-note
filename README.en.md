@@ -12,7 +12,7 @@ and let AI read and write them directly.
 ## Install
 
 Download the latest `.piplug` from the [`dist/`](dist) folder of this repo
-(named `pi.mi-note-<version>.piplug`) and install it from the PI-Desktop plugins page.
+(named `local.mi-note-<version>.piplug`) and install it from the PI-Desktop plugins page.
 Older versions are available under [Releases](../../releases).
 
 ## Getting started

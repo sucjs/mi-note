@@ -1,17 +1,24 @@
 {
   "schemaVersion": 1,
-  "id": "pi.mi-note",
+  "id": "local.mi-note",
   "name": "小米笔记",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "把小米云笔记做成一个图形化工作面板：扫码登录（手机扫一扫确认，不用密码也不受验证码/两步验证影响）、文件夹下拉 + 笔记列表 + 正文两栏界面、Markdown 编辑与自动保存、搜索、AI 问答、一键退出登录，以及一组内置的笔记操作工具。笔记能力全部内置在插件里，不需要额外配置 MCP 服务器。",
   "i18n": {
     "en": {
       "name": "Mi Note",
-      "description": "Turn Xiaomi Cloud notes into a graphical work panel: QR-code sign-in confirmed on your phone (no password, unaffected by captcha or two-step verification), a two-pane folder-dropdown/notes/body interface, Markdown editing with autosave, search, AI question answering over your notes, one-click sign-out, and built-in tools for reading and writing them. Everything is built into the plugin — no MCP server to configure."
+      "description": "Turn Xiaomi Cloud notes into a graphical work panel: QR-code sign-in confirmed on your phone (no password, unaffected by captcha or two-step verification), a two-pane folder-dropdown/notes/body interface, Markdown editing with autosave, search, AI question answering over your notes, one-click sign-out, and built-in tools for reading and writing them. Everything is built into the plugin — no MCP server to configure.",
+      "safetyNotes": "Note data is stored only in this plugin's own data directory; the plugin never reads or writes your workspace files. Sign-in is a QR code scanned and confirmed on your phone — the plugin never receives your Xiaomi account password. Note content and attachments are sent only to Xiaomi's own cloud API over HTTPS; nothing is sent to any third party. AI question answering calls the model you already configured in PI-Desktop through the host — the plugin holds no API keys."
+    },
+    "zh-CN": {
+      "name": "小米笔记",
+      "description": "把小米云笔记做成一个图形化工作面板：扫码登录（手机扫一扫确认，不用密码也不受验证码/两步验证影响）、文件夹下拉 + 笔记列表 + 正文两栏界面、Markdown 编辑与自动保存、搜索、AI 问答、一键退出登录，以及一组内置的笔记操作工具。笔记能力全部内置在插件里，不需要额外配置 MCP 服务器。",
+      "safetyNotes": "笔记数据仅保存在本插件自己的数据目录，不读取也不写入你的工作区文件。登录用手机扫码确认，插件拿不到你的小米账号密码。笔记正文与附件只经 HTTPS 发往小米自家的云接口，不发送给任何第三方。AI 问答通过宿主调用你已配置的模型，插件不持有任何 API 密钥。"
     }
   },
   "author": "QL",
-  "categories": ["productivity"],
+  "categories": ["productivity", "community"],
+  "changelog": "0.2.3：插件 id 由 pi.mi-note 改为 local.mi-note。pi. / demo. 是插件市场的保留命名空间，需运营放行；改用 local. 前缀即可从插件中心自行发布。注意：插件数据目录按 id 隔离，已装用户需把 ~/.pi-desktop/plugins/data/pi.mi-note/ 手动改名为 local.mi-note/ 才能延续原有笔记。0.2.2：补全上架市场所需的清单字段——新增 i18n.zh-CN（此前只有 en）、中英双语 safetyNotes（说明数据仅存插件数据目录、不读写工作区、扫码登录不接触密码、只与小米云通信、AI 问答用宿主已配置模型）、changelog，并把 categories 从 productivity 扩为 productivity + community。0.2.1：导出弹窗布局调整——「使用深色配色」移入「复制 HTML」卡片内部，并修复复选框被拉满整行的问题。0.2.0：对标通用 Markdown 写作体验的成批补强——笔记内图片真正显示、代码块语法高亮、KaTeX 公式、表格、嵌套列表、任务列表、引用块合并，并新增编辑器工具栏与快捷键。0.1.x：扫码登录、两栏面板、Markdown 编辑与自动保存、搜索、AI 问答、内置笔记操作工具的初始版本。",
   "main": "main.js",
   "ui": {
     "panel": "renderer/index.html",

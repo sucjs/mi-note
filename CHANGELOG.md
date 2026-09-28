@@ -3,6 +3,36 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 版本号写在 `manifest.json` 的 `version` 字段，这里是它每次变化的理由。
 
+## 0.2.3
+
+插件 id 由 `pi.mi-note` 改为 `local.mi-note`。功能无变化。
+
+### 变更
+
+- **改用 `local.` 前缀**：`pi.` 与 `demo.` 是插件市场的保留命名空间，需运营放行；
+  改为 `local.` 后可以从插件中心自行发布，不必等审批
+- 同步更新 `main.js` 的 `PLUGIN_ID`、技能文档与 README 里的包名示例
+
+## 0.2.2
+
+为上架插件市场补全清单字段。功能无变化，改动全在 `manifest.json`。
+
+### 新增
+
+- **`i18n.zh-CN`**：此前 i18n 只有 `en` 一节，中文界面的宿主拿不到本地化的
+  名称与描述
+- **中英双语 `safetyNotes`**：安装前展示的安全说明。市场把它当作权限之外的
+  第二道知情同意，缺失时高风险权限（`agent.tool.register`、`background.service`）
+  的插件说服力不足。文案写清了四件事：数据只存插件数据目录、不读写工作区文件、
+  扫码登录不接触账号密码、只与小米云通信且 AI 问答用宿主已配置的模型
+- **`changelog`**：市场详情的版本说明来源，此前只存在于 `CHANGELOG.md`，
+  目录侧取不到
+
+### 变更
+
+- `categories` 由 `["productivity"]` 扩为 `["productivity", "community"]`，
+  与市场上的社区插件惯例一致
+
 ## 0.2.1
 
 导出弹窗的布局调整。
