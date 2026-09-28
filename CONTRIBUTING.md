@@ -119,6 +119,15 @@ await client.send('Emulation.setFocusEmulationEnabled', { enabled: true });
 - **不要用 PowerShell 写 JS 文件**（5.1 会加 BOM，破坏脚本）。用 Node 生成。
 - **构建产物容易和源码漂移**。`dist/*.piplug` 与 `ui-harness/*.html` 都是产物，
   改完源码务必重新生成，否则测的是旧代码。
+- **每次小修都推进版本末位（`+0.0.1`）**。理由：`dist/*.piplug` 的文件名带版本号，
+  版本不动就会反复覆盖同一个文件，用户无法判断手里的是哪一版、也无法区分「改了」与「没改」。
+  版本号只写在 `manifest.json` 的 `version`，别处一律不得硬编码
+  （`main.js` 从清单读，面板经 `mn.ping` 回填；`verify.js` 断言的是「格式合法」与
+  「CHANGELOG 首节 == 清单版本」，而不是某个具体值）。
+  改版本时必须同步做三件事：
+  1. `manifest.json` 的 `version`
+  2. `CHANGELOG.md` 顶部加同号小节（`verify.js` 会校验两者一致）
+  3. `node tools/pack.js mi-note` 重新打包（否则 `dist/` 里留着旧版本名的文件）
 
 ---
 
