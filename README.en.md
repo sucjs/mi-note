@@ -11,8 +11,9 @@ and let AI read and write them directly.
 
 ## Install
 
-
-install it from the PI-Desktop plugins page. Also available under [Releases](../../releases).
+Download the latest `.piplug` from the [`dist/`](dist) folder of this repo
+(named `pi.mi-note-<version>.piplug`) and install it from the PI-Desktop plugins page.
+Older versions are available under [Releases](../../releases).
 
 ## Getting started
 
@@ -37,6 +38,11 @@ back after signing in again. The current version number is shown in the same cor
 at the top of the list pane, leaving vertical space for notes. Light/dark follows the host theme.
 
 **Note management** — browse, search (title and body), create, edit (Markdown with preview), delete.
+
+**Markdown preview** — headings, tables, nested lists, task lists, quotes, code blocks with
+**syntax highlighting**, math (KaTeX, inline `$…$` and block `$$…$$`), images, underline and
+highlight spans all render correctly. Images inside notes are downloaded on demand and cached
+locally, so they stay visible offline.
 
 **Autosave** — no need to hit save; changes are stored 1.5 s after you stop typing.
 Switching notes flushes the draft first, so **nothing is lost**. IME composition is never

@@ -549,6 +549,32 @@ async function handlePanelChannel(channel, payload) {
     case "mn.focus.consume":
       return { ok: true, ...svc.consumeFocus() };
 
+    // ── 附件 ──
+    /*
+     * 面板里图片是异步取的：渲染只产出带 fileId 的骨架，再回来要 data URI。
+     *
+     * 单张图走普通通道即可（宿主转发超时 30 秒）。若将来要一次取很多张，
+     * 应改为 job + 轮询（见 mn.sync.start 的写法），否则会撞超时。
+     */
+    case "mn.attachment.get": {
+      const fileId = String(payload.fileId ?? "");
+      if (!fileId) return { ok: false, error: "缺少附件 id" };
+      const kind = payload.kind === "audio" || payload.kind === "video" ? payload.kind : "image";
+      try {
+        const result = await svc.getAttachment(fileId, kind);
+        return {
+          ok: true,
+          dataUri: result.dataUri,
+          mimeType: result.mimeType,
+          bytes: result.bytes,
+          from: result.from,
+        };
+      } catch (error) {
+        // 取不到图不该让面板报错：渲染层会降级成文本提示
+        return { ok: false, error: error?.message ?? String(error) };
+      }
+    }
+
     // ── 剪贴板 ──
     // 侧边栏的「复制全文」走这里：由插件进程写入系统剪贴板，
     // 比页面里的 navigator.clipboard 更可靠（视图是 file:// 沙箱页）。

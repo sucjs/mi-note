@@ -23,6 +23,25 @@
       })();
     </script>
     <title>小米笔记</title>
+    <!--
+      渲染依赖：全部是经典脚本（非 module）——宿主以 file:// 加载面板，
+      `<script type="module">` 会被 Chromium 的 CORS 策略拒绝。
+      顺序不能变：markdown-it → 插件 → highlight.js/KaTeX → 自己的渲染模块。
+      这些都是随包离线加载的，不发任何网络请求。
+    -->
+    <!--
+      代码高亮的配色跟**面板主题**（html[data-base]）而不是操作系统。
+      宿主主题可以跟系统不一致（比如宿主设了深色但系统是浅色），
+      用 media 查询会挑错配色，高亮文字在深色底上会看不见。
+    -->
+    <link rel="stylesheet" href="vendor/hljs-light.css" />
+    <link rel="stylesheet" href="vendor/hljs-dark.css" id="hljsTheme" disabled />
+    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+    <script src="vendor/markdown-it.min.js"></script>
+    <script src="vendor/markdown-it-task-lists.min.js"></script>
+    <script src="vendor/highlight.min.js"></script>
+    <script src="vendor/katex/katex.min.js"></script>
+    <script src="lib/markdown.js"></script>
     <style>
       :root {
         color-scheme: dark;
@@ -379,6 +398,33 @@
       .md-body th, .md-body td { border: 1px solid var(--border-strong); padding: 4px 10px; }
       .md-body th { background: color-mix(in oklab, var(--fg) 5%, transparent); }
 
+      /* ── 任务列表（markdown-it-task-lists） ── */
+      .md-body .task-list-item { list-style: none; margin-left: -1.35em; }
+      .md-body .task-list-item input[type="checkbox"] {
+        margin-right: .5em; vertical-align: middle; accent-color: var(--accent);
+      }
+
+      /* ── 附件图片：异步填充，未加载时给个骨架位 ── */
+      .md-body img.md-attachment {
+        display: block; max-width: 100%; min-height: 40px;
+        margin: .8em 0; border-radius: 8px;
+        background: color-mix(in oklab, var(--fg) 5%, transparent);
+      }
+      .md-body img.md-attachment.is-loaded { background: transparent; min-height: 0; }
+      .md-body .attachment-failed,
+      .md-body .attachment-link {
+        display: inline-block; margin: .5em 0; padding: 4px 10px;
+        border: 1px dashed var(--border-strong); border-radius: 8px;
+        color: var(--muted); font-size: 12px; text-decoration: none;
+      }
+
+      /* ── 公式：KaTeX 自带样式，这里只调外边距 ── */
+      .md-body .katex-block { margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
+      .md-body .katex-fallback { color: var(--muted); }
+
+      /* ── 代码高亮：hljs 主题只上色，背景仍用面板自己的 ── */
+      .md-body pre code.hljs { background: transparent; padding: 0; }
+
       /* ── 登录遮罩 ── */
       .overlay {
         position: fixed; inset: 0; z-index: 40;
@@ -659,6 +705,20 @@
         "use strict";
 
         // ── 主题 ────────────────────────────────────────────────────────────
+        /*
+         * 代码高亮的配色跟面板主题走，而不是操作系统的 prefers-color-scheme。
+         *
+         * 宿主主题可以与系统不一致（宿主设深色、系统是浅色），用 media 查询会挑错
+         * 那一份 —— 深色底配浅色主题的深色文字，代码块直接看不见。
+         * 两张表都加载，靠 disabled 切换，避免切换时闪一下无样式。
+         */
+        const syncHljsTheme = () => {
+          const link = document.getElementById("hljsTheme");
+          if (!link) return;
+          const isDark = document.documentElement.dataset.base === "dark";
+          if (link.disabled !== !isDark) link.disabled = !isDark;
+        };
+
         const applyAppearance = (appearance) => {
           const base = appearance && appearance.base;
           document.documentElement.dataset.base =
@@ -667,6 +727,7 @@
               : window.matchMedia("(prefers-color-scheme: light)").matches
                 ? "light"
                 : "dark";
+          syncHljsTheme();
         };
         if (window.pluginBridge && window.pluginBridge.on) {
           window.pluginBridge.on("appearance:changed", applyAppearance);
@@ -679,6 +740,8 @@
         } else {
           applyAppearance(null);
         }
+        // 宿主主题到达前先按当前 data-base 定一次，避免首屏代码块配色不对
+        syncHljsTheme();
 
         // ── 基础设施 ────────────────────────────────────────────────────────
         const $ = (id) => document.getElementById(id);
@@ -692,6 +755,39 @@
           } catch (error) {
             return { ok: false, error: error && error.message ? error.message : String(error) };
           }
+        };
+
+        /*
+         * ── 附件图片 ────────────────────────────────────────────────────────
+         *
+         * 预览里的图片是异步取的：渲染只产出带 data-file-id 的骨架，这里按 id 去要
+         * data URI 再填进 src。同一张图在会话内只取一次（promise 缓存），
+         * 否则切来切去会反复下载同一张。
+         */
+        const attachmentPromises = new Map();
+
+        const fetchAttachmentDataUri = (fileId) => {
+          const key = String(fileId);
+          const cached = attachmentPromises.get(key);
+          if (cached) return cached;
+          /*
+           * 只缓存成功的结果。
+           *
+           * 若把失败也留在缓存里，一次网络抖动或未登录就会让这张图在**整个会话**
+           * 里永远取不回来（后续都直接命中那份失败缓存），用户只能重启面板。
+           */
+          const job = invoke("mn.attachment.get", { fileId: key })
+            .then((res) => {
+              const uri = res && res.ok && res.dataUri ? res.dataUri : null;
+              if (!uri) attachmentPromises.delete(key);
+              return uri;
+            })
+            .catch(() => {
+              attachmentPromises.delete(key);
+              return null;
+            });
+          attachmentPromises.set(key, job);
+          return job;
         };
 
         /*
@@ -1577,6 +1673,11 @@
             }
             view.appendChild(md);
             body.appendChild(view);
+            /*
+             * 附件图片是异步取回来的：渲染只产出带 data-file-id 的骨架，
+             * 这里再把它换成真的 data URI。取不到就降级为文本提示，不显示破图。
+             */
+            void window.MiNoteMarkdown.hydrate(md, fetchAttachmentDataUri);
           }
         };
 
@@ -2009,91 +2110,15 @@
           }, 20000);
         })();
 
-        // 极简 Markdown 渲染：转义后支持标题、列表、引用、代码块、行内样式与链接
+        /*
+         * Markdown 渲染：唯一实现在 lib/markdown.js（面板与侧边栏共用）。
+         *
+         * 此前这里有一份手写渲染器，与 views/sidebar.html 里的副本逐字相同，
+         * 任何语法补强都要改两处、漏一处两侧就不一致。现已抽成共享模块，
+         * 并换成 markdown-it（表格 / 嵌套列表 / 图片 / 代码高亮 / 公式）。
+         */
         function renderMarkdown(source) {
-          // 转义必须连引号一起处理：下面会把链接目标填进 href="..."，
-          // 不转义引号就能用 `"` 逃出属性注入其他属性/事件。
-          const escape = (text) =>
-            String(text)
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")
-              .replace(/"/g, "&quot;")
-              .replace(/'/g, "&#39;");
-          // 只给安全协议生成链接；其他（javascript:、data: 等）按纯文本显示。
-          const safeHref = (target) =>
-            /^(https?:|mailto:|mi-note:)/i.test(target) ? target : null;
-          const inline = (text) =>
-            escape(text)
-              .replace(/`([^`]+)`/g, "<code>$1</code>")
-              .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-              .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
-              .replace(/~~([^~]+)~~/g, "<del>$1</del>")
-              .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, target) => {
-                const decoded = target.replace(/&amp;/g, "&");
-                if (!safeHref(decoded)) return whole;
-                return `<a href="${target}" target="_blank" rel="noreferrer">${label}</a>`;
-              });
-
-          const lines = String(source || "").split("\n");
-          const out = [];
-          let inCode = false;
-          let codeLines = [];
-          let listType = null;
-
-          const closeList = () => {
-            if (listType) { out.push(`</${listType}>`); listType = null; }
-          };
-
-          for (const line of lines) {
-            if (/^```/.test(line)) {
-              if (inCode) {
-                out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
-                codeLines = [];
-                inCode = false;
-              } else {
-                closeList();
-                inCode = true;
-              }
-              continue;
-            }
-            if (inCode) { codeLines.push(line); continue; }
-
-            const heading = line.match(/^(#{1,6})\s+(.*)$/);
-            if (heading) {
-              closeList();
-              const level = heading[1].length;
-              out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-              continue;
-            }
-            if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { closeList(); out.push("<hr />"); continue; }
-            const quote = line.match(/^>\s?(.*)$/);
-            if (quote) { closeList(); out.push(`<blockquote>${inline(quote[1])}</blockquote>`); continue; }
-
-            const ul = line.match(/^\s*[-*]\s+(.*)$/);
-            if (ul) {
-              if (listType !== "ul") { closeList(); out.push("<ul>"); listType = "ul"; }
-              const task = ul[1].match(/^\[([xX ])\]\s*(.*)$/);
-              if (task) {
-                out.push(`<li><input type="checkbox" disabled${task[1].toLowerCase() === "x" ? " checked" : ""}> ${inline(task[2])}</li>`);
-              } else {
-                out.push(`<li>${inline(ul[1])}</li>`);
-              }
-              continue;
-            }
-            const ol = line.match(/^\s*\d+\.\s+(.*)$/);
-            if (ol) {
-              if (listType !== "ol") { closeList(); out.push("<ol>"); listType = "ol"; }
-              out.push(`<li>${inline(ol[1])}</li>`);
-              continue;
-            }
-            if (!line.trim()) { closeList(); continue; }
-            closeList();
-            out.push(`<p>${inline(line)}</p>`);
-          }
-          closeList();
-          if (inCode && codeLines.length) out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
-          return out.join("\n");
+          return window.MiNoteMarkdown.render(source);
         }
       })();
     </script>

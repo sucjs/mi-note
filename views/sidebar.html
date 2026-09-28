@@ -5,6 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="pi-plugin-chrome" content="v3" />
     <title>小米笔记</title>
+    <!--
+      渲染依赖与主面板同一套（见 renderer/lib/markdown.js 的说明）。
+      侧边栏在 views/ 下，所以路径要回到 renderer/vendor/。
+      全部是经典脚本：宿主以 file:// 加载视图，module script 会被 CORS 拒绝。
+      高亮配色跟面板主题而非操作系统（理由同主面板）。
+    -->
+    <link rel="stylesheet" href="../renderer/vendor/hljs-light.css" />
+    <link rel="stylesheet" href="../renderer/vendor/hljs-dark.css" id="hljsTheme" disabled />
+    <link rel="stylesheet" href="../renderer/vendor/katex/katex.min.css" />
+    <script src="../renderer/vendor/markdown-it.min.js"></script>
+    <script src="../renderer/vendor/markdown-it-task-lists.min.js"></script>
+    <script src="../renderer/vendor/highlight.min.js"></script>
+    <script src="../renderer/vendor/katex/katex.min.js"></script>
+    <script src="../renderer/lib/markdown.js"></script>
     <style>
       :root {
         color-scheme: dark;
@@ -180,6 +194,30 @@
       .md th, .md td { border: 1px solid var(--border-strong); padding: 3px 8px; }
       .md th { background: color-mix(in oklab, var(--fg) 5%, transparent); }
 
+      /* 任务列表：去掉项目符号，让复选框对齐 */
+      .md .task-list-item { list-style: none; margin-left: -1.2em; }
+      .md .task-list-item input[type="checkbox"] {
+        margin-right: .45em; vertical-align: middle; accent-color: var(--accent);
+      }
+
+      /* 附件图片：异步填充，未到位时留个骨架位 */
+      .md img.md-attachment {
+        display: block; max-width: 100%; min-height: 32px;
+        margin: .7em 0; border-radius: 8px;
+        background: color-mix(in oklab, var(--fg) 5%, transparent);
+      }
+      .md img.md-attachment.is-loaded { background: transparent; min-height: 0; }
+      .md .attachment-failed,
+      .md .attachment-link {
+        display: inline-block; margin: .4em 0; padding: 3px 8px;
+        border: 1px dashed var(--border-strong); border-radius: 6px;
+        color: var(--muted); font-size: 11.5px; text-decoration: none;
+      }
+
+      .md .katex-block { margin: .9em 0; overflow-x: auto; overflow-y: hidden; }
+      .md .katex-fallback { color: var(--muted); }
+      .md pre code.hljs { background: transparent; padding: 0; }
+
       .toast {
         position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
         z-index: 20; max-width: 88%;
@@ -229,12 +267,21 @@
       (function () {
         "use strict";
 
+        // 代码高亮配色跟面板主题而非操作系统（理由同主面板）
+        const syncHljsTheme = () => {
+          const link = document.getElementById("hljsTheme");
+          if (!link) return;
+          const isDark = document.documentElement.dataset.base === "dark";
+          if (link.disabled !== !isDark) link.disabled = !isDark;
+        };
+
         const applyAppearance = (appearance) => {
           const base = appearance && appearance.base;
           document.documentElement.dataset.base =
             base === "light" || base === "dark"
               ? base
               : window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+          syncHljsTheme();
         };
         if (window.pluginBridge && window.pluginBridge.on) {
           window.pluginBridge.on("appearance:changed", applyAppearance);
@@ -244,6 +291,7 @@
         } else {
           applyAppearance(null);
         }
+        syncHljsTheme();
 
         const $ = (id) => document.getElementById(id);
         const invoke = async (channel, payload) => {
@@ -403,6 +451,8 @@
           if (!state.openedMarkdown.trim()) {
             body.innerHTML = '<p style="color:var(--faint)">这篇笔记还没有正文。</p>';
           }
+          // 附件图片是异步取的（渲染只产出带 data-file-id 的骨架）
+          void window.MiNoteMarkdown.hydrate(body, (fileId) => fetchAttachmentDataUri(fileId));
           $("reader").hidden = false;
           $("readerScroll").scrollTop = 0;
           renderList();
@@ -492,87 +542,38 @@
         // 视图被宿主打开时可能带一个待定位目标（例如从别处跳转过来）
         // 这里只负责读取并展示，主面板打开时由面板消费同一个待定位目标。
 
+        /*
+         * 附件图片：与主面板同一条通道。会话内同一张图只取一次。
+         * 视图是 file:// 沙箱页，所以统一走 data URI 而不是 file:// 路径。
+         */
+        const attachmentPromises = new Map();
+        const fetchAttachmentDataUri = (fileId) => {
+          const key = String(fileId);
+          const cached = attachmentPromises.get(key);
+          if (cached) return cached;
+          // 只缓存成功：失败留在缓存里会让这张图整个会话都取不回来
+          const job = invoke("mn.attachment.get", { fileId: key })
+            .then((res) => {
+              const uri = res && res.ok && res.dataUri ? res.dataUri : null;
+              if (!uri) attachmentPromises.delete(key);
+              return uri;
+            })
+            .catch(() => {
+              attachmentPromises.delete(key);
+              return null;
+            });
+          attachmentPromises.set(key, job);
+          return job;
+        };
+
+        /*
+         * Markdown 渲染：唯一实现在 renderer/lib/markdown.js（主面板与侧边栏共用）。
+         *
+         * 此前这里有一份手写渲染器，与 renderer/index.html 里的副本逐字相同，
+         * 任何语法补强都要改两处、漏一处两侧就不一致。现已抽成共享模块。
+         */
         function renderMarkdown(source) {
-          const escape = (text) =>
-            String(text)
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")
-              .replace(/"/g, "&quot;")
-              .replace(/'/g, "&#39;");
-          // 链接目标会填进 href="..."，所以只放行安全协议，且引号已在上面转义。
-          const safeHref = (target) =>
-            /^(https?:|mailto:|mi-note:)/i.test(target) ? target : null;
-          const inline = (text) =>
-            escape(text)
-              .replace(/`([^`]+)`/g, "<code>$1</code>")
-              .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-              .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
-              .replace(/~~([^~]+)~~/g, "<del>$1</del>")
-              .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, target) => {
-                const decoded = target.replace(/&amp;/g, "&");
-                if (!safeHref(decoded)) return whole;
-                return `<a href="${target}" target="_blank" rel="noreferrer">${label}</a>`;
-              });
-
-          const lines = String(source || "").split("\n");
-          const out = [];
-          let inCode = false;
-          let codeLines = [];
-          let listType = null;
-          const closeList = () => {
-            if (listType) { out.push(`</${listType}>`); listType = null; }
-          };
-
-          for (const line of lines) {
-            if (/^```/.test(line)) {
-              if (inCode) {
-                out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
-                codeLines = [];
-                inCode = false;
-              } else {
-                closeList();
-                inCode = true;
-              }
-              continue;
-            }
-            if (inCode) { codeLines.push(line); continue; }
-
-            const heading = line.match(/^(#{1,6})\s+(.*)$/);
-            if (heading) {
-              closeList();
-              const level = heading[1].length;
-              out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
-              continue;
-            }
-            if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { closeList(); out.push("<hr />"); continue; }
-            const quote = line.match(/^>\s?(.*)$/);
-            if (quote) { closeList(); out.push(`<blockquote>${inline(quote[1])}</blockquote>`); continue; }
-
-            const ul = line.match(/^\s*[-*]\s+(.*)$/);
-            if (ul) {
-              if (listType !== "ul") { closeList(); out.push("<ul>"); listType = "ul"; }
-              const task = ul[1].match(/^\[([xX ])\]\s*(.*)$/);
-              if (task) {
-                out.push(`<li><input type="checkbox" disabled${task[1].toLowerCase() === "x" ? " checked" : ""}> ${inline(task[2])}</li>`);
-              } else {
-                out.push(`<li>${inline(ul[1])}</li>`);
-              }
-              continue;
-            }
-            const ol = line.match(/^\s*\d+\.\s+(.*)$/);
-            if (ol) {
-              if (listType !== "ol") { closeList(); out.push("<ol>"); listType = "ol"; }
-              out.push(`<li>${inline(ol[1])}</li>`);
-              continue;
-            }
-            if (!line.trim()) { closeList(); continue; }
-            closeList();
-            out.push(`<p>${inline(line)}</p>`);
-          }
-          closeList();
-          if (inCode && codeLines.length) out.push(`<pre><code>${escape(codeLines.join("\n"))}</code></pre>`);
-          return out.join("\n");
+          return window.MiNoteMarkdown.render(source);
         }
       })();
     </script>

@@ -30,7 +30,7 @@ skills/mi-note.md       注入给 Agent 的使用说明
 
 ```
 tools/pack.js           打包（store-only ZIP）
-tools/verify.js         校验产物（106 项）
+tools/verify.js         校验产物
 tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
 ```
 
@@ -41,7 +41,7 @@ tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
 
 ```bash
 node tools/pack.js mi-note     # → mi-note/dist/pi.mi-note-<版本>.piplug
-node tools/verify.js           # 校验产物（106 项）
+node tools/verify.js           # 校验产物
 ```
 
 `pack.js` 手写 ZIP 结构。**关键约束**：`.piplug` 必须是 store-only（不压缩）的 ZIP，
