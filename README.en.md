@@ -44,6 +44,12 @@ at the top of the list pane, leaving vertical space for notes. Light/dark follow
 highlight spans all render correctly. Images inside notes are downloaded on demand and cached
 locally, so they stay visible offline.
 
+**Writing aids** — a formatting toolbar (bold / italic / headings / lists / tasks / quote /
+link / image / code block / table), Tab and Shift+Tab indentation, and automatic list
+continuation on Enter (ordered lists increment, an empty item exits the list).
+Shortcuts: `Ctrl/Cmd+B`, `Ctrl/Cmd+I`, `Ctrl/Cmd+K`, `Ctrl/Cmd+Shift+C`.
+**Everything is undoable with `Ctrl/Cmd+Z`.**
+
 **Autosave** — no need to hit save; changes are stored 1.5 s after you stop typing.
 Switching notes flushes the draft first, so **nothing is lost**. IME composition is never
 saved mid-input, so pinyin never reaches the cloud.

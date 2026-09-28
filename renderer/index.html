@@ -42,6 +42,7 @@
     <script src="vendor/highlight.min.js"></script>
     <script src="vendor/katex/katex.min.js"></script>
     <script src="lib/markdown.js"></script>
+    <script src="lib/editor.js"></script>
     <style>
       :root {
         color-scheme: dark;
@@ -355,6 +356,39 @@
       .tab:hover { color: var(--fg); }
       .tab[data-active="true"] { border-bottom-color: var(--accent); color: var(--fg); font-weight: 600; }
 
+      /* ── 编辑工具栏 ── */
+      /*
+       * 只作用于 textarea 的选区，不需要选区时插模板。
+       * 图标用文本字符而不是字体图标：面板要离线可用，不想再 vendor 一套字体。
+       */
+      .editor-tools {
+        flex: 0 0 auto;
+        display: flex; align-items: center; gap: 2px;
+        padding: 4px 12px;
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto; scrollbar-width: none;
+      }
+      /*
+       * 必须显式写：`hidden` 属性靠 UA 样式的 display:none 生效，
+       * 而上一条给了 display:flex，优先级更高，会把 hidden 吃掉。
+       */
+      .editor-tools[hidden] { display: none; }
+      .editor-tools::-webkit-scrollbar { display: none; }
+      .editor-tools .tool {
+        flex: 0 0 auto;
+        border: 0; border-radius: 5px;
+        padding: 3px 7px; background: transparent;
+        color: var(--muted); font-size: 12px; line-height: 1.4;
+        white-space: nowrap;
+      }
+      .editor-tools .tool:hover { background: var(--hover); color: var(--fg); }
+      .editor-tools .tool[data-bold] { font-weight: 700; }
+      .editor-tools .tool[data-italic] { font-style: italic; }
+      .editor-tools .sep {
+        flex: 0 0 auto; width: 1px; height: 14px;
+        margin: 0 4px; background: var(--border-strong);
+      }
+
       .editor-body { flex: 1; min-height: 0; display: flex; }
       .md-input {
         flex: 1; min-width: 0;
@@ -622,6 +656,30 @@
             </div>
             <button class="btn" id="btnSave" disabled>保存</button>
             <button class="btn danger" id="btnDelete" title="删除这篇笔记" disabled>删除</button>
+          </div>
+          <!--
+            编辑工具栏：只在编辑模式显示（syncTabs 里控制）。
+            按钮统一走 data-cmd，事件用委托挂在容器上，避免十几个监听器。
+          -->
+          <div class="editor-tools" id="editorTools" hidden>
+            <button class="tool" data-cmd="bold" data-bold title="粗体（Ctrl/Cmd+B）">B</button>
+            <button class="tool" data-cmd="italic" data-italic title="斜体（Ctrl/Cmd+I）">I</button>
+            <button class="tool" data-cmd="strike" title="删除线"><s>S</s></button>
+            <button class="tool" data-cmd="code" title="行内代码（Ctrl/Cmd+Shift+C）">&lt;/&gt;</button>
+            <span class="sep"></span>
+            <button class="tool" data-cmd="h1" title="一级标题">H1</button>
+            <button class="tool" data-cmd="h2" title="二级标题">H2</button>
+            <button class="tool" data-cmd="h3" title="三级标题">H3</button>
+            <span class="sep"></span>
+            <button class="tool" data-cmd="ul" title="无序列表">• 列表</button>
+            <button class="tool" data-cmd="ol" title="有序列表">1. 列表</button>
+            <button class="tool" data-cmd="task" title="任务列表">☑ 任务</button>
+            <button class="tool" data-cmd="quote" title="引用">❝ 引用</button>
+            <span class="sep"></span>
+            <button class="tool" data-cmd="link" title="链接（Ctrl/Cmd+K）">🔗 链接</button>
+            <button class="tool" data-cmd="image" title="图片">🖼 图片</button>
+            <button class="tool" data-cmd="codeblock" title="代码块">▤ 代码块</button>
+            <button class="tool" data-cmd="table" title="表格">▦ 表格</button>
           </div>
           <div class="editor-body" id="editorBody">
             <div class="empty" id="editorEmpty">
@@ -1609,6 +1667,89 @@
           }
         };
 
+        /*
+         * ── 编辑辅助 ────────────────────────────────────────────────────────
+         *
+         * 逻辑在 lib/editor.js（面板与侧边栏共用），这里只负责「什么时候调它」。
+         *
+         * 关键：所有改动都让 editor.js 走 textarea 的原生 API 并派发 input，
+         * 因此浏览器的原生撤销栈（Ctrl+Z）和既有的自动保存都会照常工作 ——
+         * 不需要另接一套状态，也不会出现「工具栏改的内容存不进去」。
+         */
+        const attachEditorKeys = (textarea) => {
+          const editor = window.MiNoteEditor;
+          if (!editor) return;
+
+          textarea.addEventListener("keydown", (event) => {
+            // IME 合成中的按键不是用户意图（比如选词回车），一律放过
+            if (event.isComposing || state.composing) return;
+
+            const mod = event.ctrlKey || event.metaKey;
+
+            // Tab / Shift+Tab：缩进与反缩进（多行选区一起处理）
+            if (event.key === "Tab") {
+              event.preventDefault();
+              if (event.shiftKey) editor.outdent(textarea);
+              else editor.indent(textarea);
+              return;
+            }
+
+            if (mod) {
+              const key = event.key.toLowerCase();
+              if (key === "b") { event.preventDefault(); editor.wrap(textarea, "**", "**", "粗体"); return; }
+              if (key === "i") { event.preventDefault(); editor.wrap(textarea, "*", "*", "斜体"); return; }
+              if (key === "k") { event.preventDefault(); editor.wrap(textarea, "[", "](https://)", "链接文字"); return; }
+              if (key === "c" && event.shiftKey) { event.preventDefault(); editor.wrap(textarea, "`", "`", "代码"); return; }
+              return;
+            }
+
+            // Enter：列表续行（不在列表里就交回浏览器默认行为）
+            if (event.key === "Enter" && !event.shiftKey) {
+              if (editor.continueList(textarea)) event.preventDefault();
+            }
+          });
+        };
+
+        /** 工具栏按钮 → 编辑器动作。 */
+        const runEditorCommand = (cmd) => {
+          const textarea = document.querySelector(".md-input");
+          const editor = window.MiNoteEditor;
+          if (!textarea || !editor) return;
+          switch (cmd) {
+            case "bold": editor.wrap(textarea, "**", "**", "粗体"); break;
+            case "italic": editor.wrap(textarea, "*", "*", "斜体"); break;
+            case "strike": editor.wrap(textarea, "~~", "~~", "删除线"); break;
+            case "code": editor.wrap(textarea, "`", "`", "代码"); break;
+            case "link": editor.wrap(textarea, "[", "](https://)", "链接文字"); break;
+            case "image": editor.insertImage(textarea, "图片说明"); break;
+            case "h1": editor.toggleLinePrefix(textarea, "# ", { exclusive: true, match: /^#\s+/ }); break;
+            case "h2": editor.toggleLinePrefix(textarea, "## ", { exclusive: true, match: /^##\s+/ }); break;
+            case "h3": editor.toggleLinePrefix(textarea, "### ", { exclusive: true, match: /^###\s+/ }); break;
+            case "ul": editor.toggleLinePrefix(textarea, "- ", { match: /^[-*+]\s+/ }); break;
+            case "ol": editor.toggleLinePrefix(textarea, "1. ", { match: /^\d+\.\s+/ }); break;
+            case "task": editor.toggleLinePrefix(textarea, "- [ ] ", { match: /^[-*+]\s+\[[ xX]\]\s+/ }); break;
+            case "quote": editor.toggleLinePrefix(textarea, "> ", { match: /^>\s?/ }); break;
+            case "codeblock": editor.insertBlock(textarea, "```\n$SELECTION\n```", 4); break;
+            case "table":
+              editor.insertBlock(textarea, "| 列 1 | 列 2 |\n| --- | --- |\n| $SELECTION |  |");
+              break;
+            default: break;
+          }
+        };
+
+        $("editorTools").addEventListener("click", (event) => {
+          const button = event.target.closest(".tool");
+          if (!button) return;
+          event.preventDefault();
+          runEditorCommand(button.dataset.cmd);
+        });
+
+        /*
+         * 工具栏按钮按下时不能抢走 textarea 的焦点，否则选区会丢、
+         * 命令作用不到用户刚选中的文字上。
+         */
+        $("editorTools").addEventListener("mousedown", (event) => event.preventDefault());
+
         const renderEditor = () => {
           const body = $("editorBody");
           body.textContent = "";
@@ -1622,6 +1763,7 @@
             empty.innerHTML = '<div class="big">选择一篇笔记</div><div class="small">从左侧列表点开一篇即可阅读与编辑。也可以直接点右上角「新建」写一篇新的。</div>';
             body.appendChild(empty);
             $("tabs").hidden = true;
+            $("editorTools").hidden = true;
             $("titleInput").disabled = true;
             $("btnDelete").disabled = true;
             $("btnSave").disabled = true;
@@ -1631,6 +1773,8 @@
           $("tabs").hidden = false;
           $("titleInput").disabled = false;
           $("btnDelete").disabled = false;
+          // 工具栏只在编辑模式有意义（预览模式下没有可操作的选区）
+          $("editorTools").hidden = state.mode !== "edit";
 
           if (state.mode === "edit") {
             const textarea = document.createElement("textarea");
@@ -1658,6 +1802,7 @@
               }
               setDirty(true);
             });
+            attachEditorKeys(textarea);
             body.appendChild(textarea);
             // 若是从预览切回来的，还原光标与滚动
             restoreEditorView(state.pendingEditorView);
