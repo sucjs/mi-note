@@ -3,6 +3,42 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 版本号写在 `manifest.json` 的 `version` 字段，这里是它每次变化的理由。
 
+## 0.2.6
+
+取消自动续期。凭据失效时如实提示重新扫码，不再悄悄尝试换票。
+
+### 变更
+
+- **移除整条自动续期链路**：此前凭据失效时，插件会带着长效票据（`passToken`）
+  再走一次 `serviceLogin`，静默换取新的 `serviceToken`（`auth.silentRefresh` →
+  `service.silentRefresh` → `repository.refreshHook` → `client.onUnauthorized`
+  401 重试）。现在这些全部删除
+- **为什么删**：实测这条路在服务端策略上走不通 —— 无人交互时小米的登录接口
+  只返回图形 / 短信验证的**挑战字段**（`notificationUrl`、`captchaUrl`、`pwd`、
+  `securityStatus`），并且只给「登录前」的临时密钥 `psecurity`，
+  从不给正式的 `ssecurity`。而 `serviceToken` 本身是会话 Cookie（无 `expires`），
+  实测寿命约 40 分钟，到期只能重新扫码
+- **失效时如实上报**：`client.send()` 收到 401 直接判需要登录，错误信息为
+  「登录态已失效，请重新扫码登录」。不再有「网络不可用，暂时无法自动续期」
+  这类中间态，也没有任何续期回调参与
+
+### 保留
+
+- **`ensureSession` 探活仍在**（`repository` / `service` / `mn.session.ensure`）：
+  它只判断会话是否还活着，不做续期。0.2.4 修好的「掉线不被误判成登录失效」
+  行为完整保留 —— 网络故障依旧带 `network` 标记、依旧不置 `needLogin`，
+  面板失效状态下每轮轮询顺带探活一次，网络恢复后状态自动回到正常
+- **扫码登录链路不动**：`QrLoginSession` 的 `create` / `poll` / `settle` 一字未改
+- 服务端 5xx 之类不再被笼统说成「登录已失效」，而是如实回报原始错误
+
+### 约定
+
+- 回归测试 `tools/ui-harness/offline-refresh.test.js` 重写为 19 项：
+  断言 `auth` / `service` 不再导出续期 API、`repository` 不再有 `refreshHook`、
+  `client` 不再挂 `onUnauthorized` 且 401 时零次续期调用；
+  同时保留网络故障分类、探活语义与 5xx 如实回报的断言
+- 删除已无对应实现的 `tools/ui-harness/session-refresh.test.js`
+
 ## 0.2.5
 
 新增批量导入 Markdown。

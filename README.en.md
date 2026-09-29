@@ -78,7 +78,8 @@ saved mid-input, so pinyin never reaches the cloud.
 The plugin never sees any API key, and only retrieved snippets are sent as context.
 
 **Auto sync** — incremental sync every 5 minutes, re-fetching only changed bodies.
-Expired credentials are refreshed silently, so no manual cookie copying.
+If the session expires the panel says so plainly and you just scan the QR code again —
+no manual cookie copying.
 
 ### Sidebar
 

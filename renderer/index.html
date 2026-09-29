@@ -3262,13 +3262,16 @@
             const res = await invoke("mn.status");
             if (!res.ok) return;
             /*
-             * 状态显示「登录已失效」时顺手探活一次。
+             * 状态显示「登录已失效」时顺手探活一次（mn.session.ensure）。
              *
              * 失效可能只是一次网络抖动（掉线、公司 WiFi 登录网关、代理拦截）
              * 造成的误判，而唯一的清除路径就是走一次 ensureSession ——
              * 以前面板从不调它，于是一次抖动就会让状态栏一直挂着
              * 「登录已失效，请重新扫码」，直到用户碰巧做了别的操作。
-             * 这里每轮只试一次，成功了状态自然回到正常。
+             * 这里每轮只探活一次，确认仍可用就自然回到正常状态。
+             *
+             * 注意：探活只判断会话是否还活着，不做自动续期（0.2.6 起移除，
+             * 小米的续期接口在无人交互时换不到新票据）。真的失效就得重新扫码。
              */
             if (res.status && res.status.needLogin) await invoke("mn.session.ensure");
             const next = await invoke("mn.status");

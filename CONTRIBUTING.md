@@ -15,7 +15,7 @@ manifest.json           清单：权限、命令、视图、Agent 工具声明
 main.js                 插件入口：命令 / Agent 工具 / 面板通道 / 后台同步服务
 lib/
   http.js               极简 HTTP 客户端 + Cookie 罐（含可中止请求）
-  auth.js               扫码登录（longPolling 协议）与静默续期
+  auth.js               扫码登录（longPolling 协议）
   client.js             i.mi.com 笔记 API（读 / 写 / 删除 / 文件夹）
   converter.js          小米自有 XML ↔ Markdown 双向转换
   repository.js         笔记仓库：增量同步、视图模型、检索打分
@@ -41,7 +41,7 @@ tools/embed-assets.js   把导出要用的样式/字体内联成 renderer/lib/as
 tools/verify.js         校验产物
 tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
   import.test.js           批量导入回归（标题解析 + 文件夹编排）
-  offline-refresh.test.js  掉线误判回归（网络故障 vs 票据过期）
+  offline-refresh.test.js  掉线误判 + 无续期回归（网络故障 vs 登录失效）
 ```
 
 > **为什么工具不放在插件目录里**：`pack.js` 会打包插件目录下除 `.git` /
@@ -54,7 +54,7 @@ node tools/embed-assets.js     # 改了 vendor 样式/字体后必须先跑（�
 node tools/pack.js mi-note     # → mi-note/dist/local.mi-note-<版本>.piplug
 node tools/verify.js           # 校验产物（末尾打印通过 / 失败项数）
 node tools/ui-harness/import.test.js           # 批量导入回归
-node tools/ui-harness/offline-refresh.test.js  # 掉线误判回归
+node tools/ui-harness/offline-refresh.test.js  # 掉线误判 / 无续期回归
 ```
 
 > 校验脚本**不写死项数**：断言会随修复增加，写死的数字必然漂移成假信息。
