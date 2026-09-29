@@ -1,0 +1,21 @@
+# 统一换行规则，让包内容只取决于仓库内容，而不是构建机的设置。
+#
+# 背景：Windows 上 core.autocrlf=true 会把文本签出成 CRLF，而提交进仓库的是
+# LF。若不固定规则，同一份源码在不同机器上打出的 .piplug 字节不同，
+# tools/verify.js 的「与源文件逐字节一致」会误报，git 也永远显示 dist 被改动。
+#
+# 仓库内一律存 LF（text=auto 会在提交时规范化），工作区用哪种换行不影响打包：
+# tools/pack.js 入包前会统一收敛成 LF。
+
+* text=auto eol=lf
+
+# 构建产物与二进制资源：不做任何换行转换
+*.piplug binary
+*.woff2 binary
+*.woff binary
+*.ttf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
