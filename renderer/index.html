@@ -625,6 +625,73 @@
         width: auto; margin: 0; flex: 0 0 auto; accent-color: var(--accent);
       }
 
+      /* ── 导入弹窗 ── */
+      .import-dialog .box { width: 430px; }
+      .import-dialog .import-note {
+        margin: 0 0 12px; color: var(--muted); font-size: 11.5px; line-height: 1.65;
+      }
+      .import-dialog .import-actions { display: flex; flex-direction: column; gap: 6px; }
+      /* 与导出弹窗同款卡片：主体是按钮，附加选项嵌在卡片内部 */
+      .import-dialog .import-action {
+        border: 1px solid var(--border-strong); border-radius: 8px;
+        background: transparent; overflow: hidden;
+      }
+      .import-dialog .import-action:hover { border-color: var(--accent); }
+      .import-dialog .import-actions button {
+        display: flex; align-items: center; gap: 8px;
+        width: 100%; text-align: left;
+        border: 0; padding: 8px 12px; background: transparent; color: var(--fg);
+        font-size: 12.5px;
+      }
+      .import-dialog .import-actions button:hover:not(:disabled) { background: var(--hover); }
+      .import-dialog .import-actions button:disabled { opacity: .45; cursor: default; }
+      .import-dialog .import-actions .sub {
+        display: block; margin-top: 2px; color: var(--faint); font-size: 11px;
+      }
+      .import-dialog .import-option {
+        display: flex; align-items: center; gap: 6px;
+        border-top: 1px solid var(--border);
+        padding: 6px 12px;
+        color: var(--secondary); font-size: 11.5px; cursor: pointer;
+      }
+      .import-dialog .import-option:hover { background: var(--hover); }
+      .import-dialog .import-option input {
+        width: auto; margin: 0; flex: 0 0 auto; accent-color: var(--accent);
+      }
+      .import-dialog .import-target {
+        display: flex; align-items: center; gap: 8px; margin-top: 12px;
+        color: var(--secondary); font-size: 12px;
+      }
+      .import-dialog .import-target select {
+        flex: 1; min-width: 0;
+        border: 1px solid var(--border-strong); border-radius: 8px;
+        padding: 5px 8px; background: var(--bg); color: var(--fg); font-size: 12.5px;
+      }
+      .import-dialog .import-summary {
+        margin: 10px 0 0; min-height: 16px;
+        color: var(--faint); font-size: 11.5px; line-height: 1.6;
+      }
+      .import-dialog .import-summary[data-state="error"] { color: var(--danger); }
+      .import-dialog .import-summary[data-state="busy"] { color: var(--accent); }
+      .import-dialog .import-bar {
+        margin-top: 6px; height: 4px; border-radius: 2px;
+        background: var(--border); overflow: hidden;
+      }
+      .import-dialog .import-bar[hidden] { display: none; }
+      .import-dialog .import-bar i {
+        display: block; height: 100%; width: 0;
+        background: var(--accent); transition: width .18s linear;
+      }
+      /* 拖拽到面板任意位置时的高亮提示 */
+      body.is-dropping::after {
+        content: "松开即导入 Markdown";
+        position: fixed; inset: 8px; z-index: 40; pointer-events: none;
+        display: flex; align-items: center; justify-content: center;
+        border: 2px dashed var(--accent); border-radius: 12px;
+        background: color-mix(in oklab, var(--bg) 78%, transparent);
+        color: var(--accent); font-size: 14px; font-weight: 600;
+      }
+
       /* ── 问答抽屉 ── */
       .ask-panel {
         flex: 0 0 auto;
@@ -744,6 +811,7 @@
             </div>
             <button class="btn" id="btnOutline" title="显示 / 隐藏大纲" disabled>大纲</button>
             <button class="btn" id="btnExport" title="导出 Markdown / HTML" disabled>导出</button>
+            <button class="btn" id="btnImport" title="导入 Markdown 文件或文件夹" disabled>导入</button>
             <button class="btn" id="btnSave" disabled>保存</button>
             <button class="btn danger" id="btnDelete" title="删除这篇笔记" disabled>删除</button>
           </div>
@@ -855,9 +923,48 @@
       </div>
     </div>
 
+    <!-- 导入 -->
+    <div class="input-dialog import-dialog" id="importDialog" hidden>
+      <div class="box">
+        <h3>导入 Markdown</h3>
+        <p class="import-note">
+          从本机选 .md 文件导入到小米笔记。文件内容由面板读取后交给插件上传，
+          插件不会读取你的工作区。也可以直接把文件或文件夹拖进面板。
+        </p>
+        <div class="import-actions">
+          <div class="import-action">
+            <button id="importPickFiles">
+              <span>选择文件…<span class="sub">一次可多选 .md / .markdown / .txt</span></span>
+            </button>
+          </div>
+          <div class="import-action">
+            <button id="importPickFolder">
+              <span>选择文件夹…<span class="sub">递归包含子目录里的所有 Markdown</span></span>
+            </button>
+            <label class="import-option">
+              <input type="checkbox" id="importKeepStructure" checked />
+              <span>保留子文件夹结构（按目录在小米笔记里建文件夹）</span>
+            </label>
+          </div>
+        </div>
+        <div class="import-target">
+          <span>导入到</span>
+          <select id="importFolder"></select>
+        </div>
+        <p class="import-summary" id="importSummary">尚未选择文件。</p>
+        <div class="import-bar" id="importBar" hidden><i id="importBarFill"></i></div>
+        <div class="actions">
+          <button class="btn" id="importCancel">取消</button>
+          <button class="btn primary" id="importStart" disabled>开始导入</button>
+        </div>
+      </div>
+      <!-- 两个隐藏的文件选择器：一个选多文件，一个选目录（webkitdirectory） -->
+      <input type="file" id="importFileInput" multiple accept=".md,.markdown,.mdown,.mkd,.txt" hidden />
+      <input type="file" id="importDirInput" multiple webkitdirectory directory hidden />
+    </div>
+
     <!-- 登录 -->
-    <div class="overlay" id="loginOverlay" hidden>
-      <div class="login-card">
+    <div class="overlay" id="loginOverlay" hidden>      <div class="login-card">
         <h2>扫码登录小米账号</h2>
         <p class="sub">用小米手机「设置 → 小米账号 → 扫一扫」扫描并确认即可，不需要输入密码。</p>
         <div class="qr-box">
@@ -1171,6 +1278,10 @@
           jobs: new Set(),
           askModel: "",
           askBusy: false,
+          /* 已选好待导入的文件：[{ name, markdown, dirs }]，dirs 为相对子目录链 */
+          importFiles: [],
+          /* 导入进行中：挡住重复提交与拖拽 */
+          importing: false,
         };
 
         /*
@@ -1288,7 +1399,7 @@
         };
 
         const setEnabled = (on) => {
-          for (const id of ["btnNew", "btnSync", "search", "btnNewFolder"]) {
+          for (const id of ["btnNew", "btnSync", "search", "btnNewFolder", "btnImport"]) {
             const el = $(id);
             if (el) el.disabled = !on;
           }
@@ -1433,6 +1544,11 @@
           $("titleInput").value = "";
           $("savedHint").textContent = "";
           $("exportDialog").hidden = true;
+          // 已选待导入的文件属于上一个账号的上下文，一并清掉
+          state.importFiles = [];
+          state.importing = false;
+          $("importDialog").hidden = true;
+          document.body.classList.remove("is-dropping");
           noteNodes.clear();
           $("folderSelect").textContent = "";
           renderNotes();
@@ -2233,6 +2349,407 @@
           } finally {
             button.disabled = false;
           }
+        });
+
+        /*
+         * ── 导入 ────────────────────────────────────────────────────────────
+         *
+         * 与导出的约束完全对称：面板没有 fs 权限，也承诺不读写工作区文件。
+         * 所以导入只能走「用户显式选中的文件」这条路 —— `<input type="file">`
+         * （含 `webkitdirectory` 选目录）与拖拽，浏览器把用户选中的文件以 File
+         * 对象交给页面，页面读出文本再交给插件上传。插件进程全程不碰文件系统，
+         * manifest 因此不需要任何 fs.* 权限。
+         *
+         * 注意不能用 `showDirectoryPicker()`（File System Access API）：面板是
+         * `file://` 页面，不是安全上下文，该 API 直接不可用。`webkitdirectory`
+         * 是这条路上唯一能拿到目录结构的办法。
+         */
+        const IMPORT_EXT = /\.(md|markdown|mdown|mkd|txt)$/i;
+        const isImportable = (name) => IMPORT_EXT.test(String(name || ""));
+        /*
+         * 单次上限，与 repository.importNotes 的 maxItems 对齐。
+         *
+         * 在面板这一侧就先卡住，而不是让用户选完 5 万个文件再等插件逐条回报
+         * 「超出上限」：读文件、拼 payload、过宿主通道都要成本，早点说清楚更省事。
+         */
+        const IMPORT_MAX_FILES = 500;
+
+        /** 人读的体积。 */
+        const formatBytes = (bytes) => {
+          if (bytes < 1024) return `${bytes} B`;
+          if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+          return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+        };
+
+        /** 同一份文件的稳定标识：目录链 + 文件名。用于挡掉重复拖入。 */
+        const fileKey = (entry) => `${entry.dirs.join("/")}\u0000${entry.name}`;
+
+        /**
+         * 从 `webkitRelativePath`（形如 `根目录/子目录/a.md`）拆出目录链。
+         *
+         * 保留最外层根目录名：用户选 D:\notes\journal 时云端会建出同名的 journal
+         * 文件夹，结构与来源一眼对得上。重复导入不会建出重名目录 —— repository
+         * 按 (parentId, name) 索引复用已有文件夹。
+         * 普通多选（不是选目录）时 `webkitRelativePath` 为空串，目录链就是空的。
+         */
+        const dirsOf = (file) => {
+          const parts = String(file.webkitRelativePath || "").split("/").filter(Boolean);
+          return parts.length > 1 ? parts.slice(0, -1) : [];
+        };
+
+        /**
+         * 把文件读成文本。单个文件读不出来只跳过它，不能让整批导入作废。
+         * @returns {Promise<{added:Array<object>, unreadable:number}>}
+         */
+        const readPairs = async (pairs) => {
+          const added = [];
+          let unreadable = 0;
+          for (const pair of pairs) {
+            try {
+              added.push({
+                name: pair.file.name,
+                markdown: await pair.file.text(),
+                dirs: pair.dirs,
+                bytes: pair.file.size || 0,
+              });
+            } catch {
+              unreadable += 1;
+            }
+          }
+          return { added, unreadable };
+        };
+
+        /**
+         * 拖拽目录时必须递归展开。
+         * `readEntries` 每次最多返回 100 条，**必须循环读到空数组为止**，
+         * 只调一次会静默丢掉大目录里第 100 个之后的文件。
+         */
+        const readEntriesAll = (reader) => new Promise((resolve) => {
+          const all = [];
+          const step = () => reader.readEntries(
+            (batch) => {
+              if (!batch.length) return resolve(all);
+              all.push(...batch);
+              step();
+            },
+            () => resolve(all),
+          );
+          step();
+        });
+
+        const walkEntry = async (entry, dirs, out) => {
+          if (!entry) return;
+          if (entry.isFile) {
+            const file = await new Promise((resolve) => entry.file(resolve, () => resolve(null)));
+            if (file && isImportable(file.name)) out.push({ file, dirs });
+            return;
+          }
+          if (entry.isDirectory) {
+            const children = await readEntriesAll(entry.createReader());
+            for (const child of children) await walkEntry(child, [...dirs, entry.name], out);
+          }
+        };
+
+        /** 把一次 drop 变成 `[{file, dirs}]`。 */
+        const pairsFromDrop = async (dataTransfer) => {
+          if (!dataTransfer) return [];
+          const entries = [];
+          for (const item of [...(dataTransfer.items || [])]) {
+            if (item.kind !== "file") continue;
+            const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+            if (entry) entries.push(entry);
+          }
+          if (!entries.length) {
+            // 退化路径：拿不到 entry（有些来源只给 File）时只能按平铺文件处理
+            return [...(dataTransfer.files || [])]
+              .filter((file) => isImportable(file.name))
+              .map((file) => ({ file, dirs: [] }));
+          }
+          const out = [];
+          for (const entry of entries) await walkEntry(entry, [], out);
+          return out;
+        };
+
+        const renderImportFolders = () => {
+          const select = $("importFolder");
+          select.textContent = "";
+          const rootCount = state.folders.reduce((sum, f) => sum + f.count, 0);
+          const rootOption = document.createElement("option");
+          rootOption.value = "0";
+          rootOption.textContent = `全部笔记（${rootCount}）`;
+          select.appendChild(rootOption);
+          for (const folder of state.folders) {
+            const option = document.createElement("option");
+            option.value = folder.id;
+            option.textContent = `${folder.name}（${folder.count}）`;
+            select.appendChild(option);
+          }
+          // 默认落在当前浏览的文件夹：所见即所导
+          select.value = state.folderId || "0";
+        };
+
+        const updateImportSummary = (extra) => {
+          const summary = $("importSummary");
+          const files = state.importFiles;
+          if (state.importing) return;
+          if (!files.length) {
+            summary.dataset.state = extra ? "error" : "";
+            summary.textContent = extra || "尚未选择文件。";
+            $("importStart").disabled = true;
+            return;
+          }
+          // 统计「子文件夹」按目录链去重，而不是按文件数
+          const dirs = new Set();
+          for (const file of files) {
+            for (let i = 1; i <= file.dirs.length; i += 1) dirs.add(file.dirs.slice(0, i).join("/"));
+          }
+          const chars = files.reduce((sum, file) => sum + (file.markdown ? file.markdown.length : 0), 0);
+          const bytes = files.reduce((sum, file) => sum + (file.bytes || 0), 0);
+          const overflow = files.length > IMPORT_MAX_FILES;
+          summary.dataset.state = overflow || extra ? "error" : "";
+          summary.textContent =
+            `已选 ${files.length} 个文件` +
+            (dirs.size ? ` · ${dirs.size} 个子文件夹` : "") +
+            ` · 正文合计 ${chars} 字` +
+            (bytes ? `（${formatBytes(bytes)}）` : "") +
+            (extra ? ` · ${extra}` : "") +
+            (overflow ? ` · 单次最多 ${IMPORT_MAX_FILES} 个，超出部分不会导入` : "");
+          $("importStart").disabled = overflow;
+        };
+
+        /**
+         * 收下文件。
+         * @param {Array<{file:File, dirs:string[]}>} pairs
+         */
+        const ingest = async (pairs) => {
+          // 去重：同一份文件被拖两次（或先选文件又拖了一遍）不该导入两遍
+          const seen = new Set(state.importFiles.map(fileKey));
+          const fresh = [];
+          let duplicated = 0;
+          for (const pair of pairs) {
+            const key = fileKey({ name: pair.file.name, dirs: pair.dirs });
+            if (seen.has(key)) { duplicated += 1; continue; }
+            seen.add(key);
+            fresh.push(pair);
+          }
+          const { added, unreadable } = await readPairs(fresh);
+          state.importFiles.push(...added);
+          const notes = [];
+          if (duplicated) notes.push(`${duplicated} 个重复已忽略`);
+          if (unreadable) notes.push(`${unreadable} 个读不出来已跳过`);
+          updateImportSummary(notes.join("，"));
+        };
+
+        /**
+         * @param {boolean} reset 是否清空已选文件并重置对话框。
+         *   从「导入」按钮进要清空；拖拽追加到已打开的对话框时不能清空，
+         *   也不该把用户刚勾好的选项复位。
+         */
+        const openImportDialog = (reset = true) => {
+          if (!state.loggedIn) return;
+          state.importing = false;
+          if (reset) {
+            state.importFiles = [];
+            renderImportFolders();
+            $("importKeepStructure").checked = true;
+            $("importBar").hidden = true;
+            $("importBarFill").style.width = "0%";
+            $("importStart").textContent = "开始导入";
+            $("importCancel").textContent = "取消";
+          }
+          $("importCancel").disabled = false;
+          if (reset) updateImportSummary();
+          $("importDialog").hidden = false;
+        };
+
+        const closeImportDialog = () => {
+          // 导入进行中不让关：job 已经在插件进程里跑了，关掉只会让用户以为取消了
+          if (state.importing) return;
+          $("importDialog").hidden = true;
+          state.importFiles = [];
+        };
+
+        $("btnImport").addEventListener("click", () => openImportDialog(true));
+        $("importCancel").addEventListener("click", closeImportDialog);
+        $("importDialog").addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeImportDialog();
+        });
+
+        // 选文件 / 选目录都走同一个隐藏 input，靠 webkitdirectory 区分
+        const pickWith = (inputId) => {
+          const input = $(inputId);
+          // 必须先清空 value：否则连选同一个文件两次不会再派发 change
+          input.value = "";
+          input.click();
+        };
+        $("importPickFiles").addEventListener("click", () => pickWith("importFileInput"));
+        $("importPickFolder").addEventListener("click", () => pickWith("importDirInput"));
+        for (const id of ["importFileInput", "importDirInput"]) {
+          $(id).addEventListener("change", async (event) => {
+            const picked = [...(event.target.files || [])]
+              .filter((file) => isImportable(file.name))
+              .map((file) => ({ file, dirs: dirsOf(file) }));
+            if (!picked.length) {
+              updateImportSummary("选中的文件里没有 Markdown");
+              return;
+            }
+            await ingest(picked);
+          });
+        }
+
+        const startImport = async () => {
+          if (state.importing || !state.importFiles.length) return;
+          // 面板这侧也卡一次上限：repository 会把超出的记成失败，但让用户
+          // 白白等一整轮才看到「超出上限」不如现在就说清楚
+          const files = state.importFiles.slice(0, IMPORT_MAX_FILES);
+          const overflow = state.importFiles.length - files.length;
+          // 只传插件需要的三个字段：bytes 只是面板用来显示体积的
+          const items = files.map((file) => ({
+            name: file.name,
+            markdown: file.markdown,
+            dirs: file.dirs,
+          }));
+          const folderId = $("importFolder").value || "0";
+          const keepStructure = $("importKeepStructure").checked;
+
+          state.importing = true;
+          const start = $("importStart");
+          const cancel = $("importCancel");
+          const summary = $("importSummary");
+          start.disabled = true;
+          cancel.disabled = true;
+          start.textContent = "导入中…";
+          summary.dataset.state = "busy";
+          summary.textContent = `正在导入 0/${items.length}…`;
+          $("importBar").hidden = false;
+          $("importBarFill").style.width = "0%";
+
+          const res = await invoke("mn.import.start", { items, folderId, keepStructure });
+          if (!res.ok) {
+            state.importing = false;
+            start.disabled = false;
+            cancel.disabled = false;
+            start.textContent = "开始导入";
+            summary.dataset.state = "error";
+            summary.textContent = res.error || "导入失败";
+            return;
+          }
+
+          const jobId = res.jobId;
+          // 登记为进行中的任务，免得 20 秒的状态轮询把进度文案覆盖掉
+          state.jobs.add(jobId);
+          const poll = setInterval(async () => {
+            const jobRes = await invoke("mn.job.get", { jobId });
+            const job = jobRes.job;
+            if (!job) { clearInterval(poll); state.jobs.delete(jobId); state.importing = false; return; }
+            if (job.status === "running") {
+              const p = job.progress || {};
+              const done = Number(p.done) || 0;
+              const total = Number(p.total) || items.length;
+              summary.textContent = `正在导入 ${done}/${total}…` + (p.title ? `（${p.title}）` : "");
+              $("importBarFill").style.width = `${total ? Math.round((done / total) * 100) : 0}%`;
+              return;
+            }
+            clearInterval(poll);
+            state.jobs.delete(jobId);
+            state.importing = false;
+            cancel.disabled = false;
+            start.textContent = "开始导入";
+            $("importBar").hidden = true;
+
+            if (job.status !== "done") {
+              summary.dataset.state = "error";
+              summary.textContent = job.error || "导入失败";
+              return;
+            }
+
+            const result = job.result || {};
+            const created = Number(result.created) || 0;
+            const failed = Array.isArray(result.failed) ? result.failed : [];
+            const folders = Number(result.foldersCreated) || 0;
+            summary.dataset.state = failed.length ? "error" : "";
+            summary.textContent =
+              `成功 ${created} 篇` +
+              (folders ? ` · 新建 ${folders} 个文件夹` : "") +
+              (failed.length
+                ? ` · 失败 ${failed.length} 篇：` +
+                  failed.slice(0, 3).map((f) => `${f.name || "（无标题）"}（${f.error}）`).join("；") +
+                  (failed.length > 3 ? ` 等 ${failed.length} 项` : "")
+                : "") +
+              (overflow ? ` · 另有 ${overflow} 个文件因超出单次上限未导入` : "");
+
+            await refreshStatus();
+            await loadFolders();
+            await loadNotes();
+
+            if (!failed.length) {
+              state.importFiles = [];
+              $("importDialog").hidden = true;
+              toast(`已导入 ${created} 篇笔记`);
+            } else {
+              cancel.textContent = "关闭";
+              toast(`导入完成：成功 ${created} 篇，失败 ${failed.length} 篇`, "warn");
+            }
+          }, 900);
+        };
+        $("importStart").addEventListener("click", () => void startImport());
+
+        /*
+         * 拖拽导入。拖到面板任意位置即可，不必先开对话框。
+         *
+         * 两个必须处理的坑：
+         *   1. `dragover` 必须 `preventDefault()`，否则浏览器根本不派发 drop。
+         *   2. 文件拖到页面上时，浏览器的**默认动作是导航到那个文件** —— 面板会
+         *      被整个替换掉。所以只要拖的是文件，无论登录与否都要拦住默认行为
+         *      （未登录时给一句提示，而不是让它静默失效或把面板弄没）。
+         * 用 dragenter/dragleave 计数判断「是否真的离开了窗口」：子元素之间移动
+         * 也会派发 dragleave，只看单个事件会让高亮疯狂闪烁。
+         */
+        let dragDepth = 0;
+        let dragHasFiles = false;
+        const hasFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
+
+        document.addEventListener("dragenter", (event) => {
+          if (!hasFiles(event)) return;
+          event.preventDefault();
+          dragHasFiles = true;
+          dragDepth += 1;
+          // 未登录/导入中不摆出「松开即导入」的架势，免得用户白拖一趟
+          if (state.loggedIn && !state.importing) document.body.classList.add("is-dropping");
+        });
+        document.addEventListener("dragover", (event) => {
+          if (!dragHasFiles) return;
+          // 不 preventDefault 的话浏览器会拒绝这次 drop，并改成导航到该文件
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        });
+        document.addEventListener("dragleave", () => {
+          dragDepth = Math.max(0, dragDepth - 1);
+          if (!dragDepth) {
+            dragHasFiles = false;
+            document.body.classList.remove("is-dropping");
+          }
+        });
+        document.addEventListener("drop", async (event) => {
+          dragDepth = 0;
+          dragHasFiles = false;
+          document.body.classList.remove("is-dropping");
+          if (!hasFiles(event)) return; // 拖的是选中的文字，交给 textarea 自己处理
+          event.preventDefault();
+          if (!state.loggedIn) {
+            toast("请先扫码登录，再导入笔记", "warn");
+            return;
+          }
+          if (state.importing) return;
+          const pairs = await pairsFromDrop(event.dataTransfer);
+          if (!pairs.length) {
+            toast("拖进来的内容里没有 Markdown 文件", "warn");
+            return;
+          }
+          // 对话框已打开时追加，否则新开一个（用户还要选导入到哪个文件夹）
+          const wasOpen = !$("importDialog").hidden;
+          openImportDialog(!wasOpen);
+          await ingest(pairs);
         });
 
         const renderEditor = () => {

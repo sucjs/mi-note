@@ -534,6 +534,26 @@ async function handlePanelChannel(channel, payload) {
     case "mn.folder.create":
       return { ok: true, folder: await svc.createFolder(payload.name, payload.parentId) };
 
+    // ── 批量导入 ──
+    /*
+     * 文件内容由面板读好传进来（用户经系统文件选择器 / 拖拽显式选中的 File 对象），
+     * 插件进程不碰文件系统 —— 所以这里没有、也不需要任何 fs.* 权限。
+     *
+     * 返回 jobId 而非结果：导入可能跑几分钟，宿主转发面板调用的超时是 30 秒。
+     */
+    case "mn.import.start": {
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      if (!items.length) return { ok: false, error: "没有可导入的文件" };
+      return {
+        ok: true,
+        jobId: svc.submitImport({
+          items,
+          folderId: payload.folderId,
+          keepStructure: payload.keepStructure === true,
+        }),
+      };
+    }
+
     // ── AI 问答 ──
     case "mn.models.list":
       return { ok: true, models: await svc.listModels() };

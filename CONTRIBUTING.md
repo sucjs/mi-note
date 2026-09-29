@@ -21,7 +21,14 @@ lib/
   repository.js         笔记仓库：增量同步、视图模型、检索打分
   store.js              凭据与缓存的原子持久化（插件数据目录，0600）
   service.js            业务编排：登录 / 同步 / 读写 / AI 问答 / 任务机制
-renderer/index.html     主面板（列表 + 正文 + 扫码 + 编辑预览 + AI 问答）
+renderer/index.html     主面板（列表 + 正文 + 扫码 + 编辑预览 + 导入导出 + AI 问答）
+renderer/lib/
+  markdown.js           Markdown → HTML 渲染（markdown-it + KaTeX + hljs，两侧共用）
+  editor.js             编辑器辅助：工具栏动作、列表续行、快捷键、撤销栈
+  outline.js            大纲抽取、滚动联动、当前节高亮
+  export.js             导出 Markdown / 自包含 HTML
+  assets.js             **生成物**：内联的样式与字体（勿手改，见下）
+  vendor/               随包离线的三方库（markdown-it / highlight.js / KaTeX）
 views/sidebar.html      侧边栏视图（紧凑列表 + 内联阅读 + 复制全文）
 skills/mi-note.md       注入给 Agent 的使用说明
 ```
@@ -33,6 +40,8 @@ tools/pack.js           打包（store-only ZIP）
 tools/embed-assets.js   把导出要用的样式/字体内联成 renderer/lib/assets.js
 tools/verify.js         校验产物
 tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
+  import.test.js           批量导入回归（标题解析 + 文件夹编排）
+  offline-refresh.test.js  掉线误判回归（网络故障 vs 票据过期）
 ```
 
 > **为什么工具不放在插件目录里**：`pack.js` 会打包插件目录下除 `.git` /
@@ -43,8 +52,12 @@ tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
 ```bash
 node tools/embed-assets.js     # 改了 vendor 样式/字体后必须先跑（见下）
 node tools/pack.js mi-note     # → mi-note/dist/local.mi-note-<版本>.piplug
-node tools/verify.js           # 校验产物
+node tools/verify.js           # 校验产物（末尾打印通过 / 失败项数）
+node tools/ui-harness/import.test.js           # 批量导入回归
+node tools/ui-harness/offline-refresh.test.js  # 掉线误判回归
 ```
+
+> 校验脚本**不写死项数**：断言会随修复增加，写死的数字必然漂移成假信息。
 
 `pack.js` 手写 ZIP 结构。**关键约束**：`.piplug` 必须是 store-only（不压缩）的 ZIP，
 宿主安装器会拒绝 deflate 条目。
@@ -69,11 +82,11 @@ node tools/verify.js           # 校验产物
 | --- | --- |
 | 结构 | 文件数 ≤ 2000、体积 < 50 MB、全部 store-only |
 | 内容 | 包内每个条目与源文件逐字节比对 |
-| 回归 | 断言历史修复仍在（界面、自动保存、局部更新、删除撤销、导出等） |
+| 回归 | 断言历史修复仍在（界面、自动保存、局部更新、删除撤销、导出、批量导入等） |
 | 文档 | README / manifest 的描述与实现一致，开发文件没混进包 |
 
 回归与文档两类是重点：把每个踩过的坑固化成断言，避免改代码时无声回归。
-其中「导出不得引入 `fs.*` 权限」与「assets.js 指纹」两类断言尤其不能删 ——
+其中「导出与导入不得引入 `fs.*` 权限」与「assets.js 指纹」两类断言尤其不能删 ——
 它们守住的是对外承诺（不读写工作区文件）与构建产物不漂移。
 
 ## 调试：ui-harness
@@ -141,8 +154,8 @@ await client.send('Emulation.setFocusEmulationEnabled', { enabled: true });
 
 ### 为什么长任务走 job + 轮询
 
-宿主转发面板通道调用的超时是 30 秒，而全量同步与模型问答都可能跑几分钟。所以
-`mn.login.start` / `mn.sync.start` / `mn.ask` 都是立即返回 `jobId`，
+宿主转发面板通道调用的超时是 30 秒，而全量同步、模型问答、批量导入都可能跑几分钟。所以
+`mn.login.start` / `mn.sync.start` / `mn.ask` / `mn.import.start` 都是立即返回 `jobId`，
 由页面轮询 `mn.job.get` 取进度与结果。
 
 ### 为什么布局用纯 CSS 栅格
@@ -201,6 +214,39 @@ grid-template-columns: minmax(240px, min(300px, 42%)) minmax(0, 1fr);
 `renderEditor` 是销毁重建。从预览切回编辑时页面上没有 textarea，
 `captureEditorView()` 返回 `null`，**无条件赋值会把上一步存好的快照覆盖成 null**，
 光标照样丢。必须只在 `state.mode === "edit"` 时抓。
+
+### 批量导入为什么不需要 fs 权限
+
+面板对外承诺「不读也不写你的工作区文件」，导出功能为此走剪贴板而不是写文件。
+导入看似必须读文件，其实有一条同样不碰权限的路：**让用户显式选中文件**。
+
+- 选文件 / 选目录用 `<input type="file">`（目录靠 `webkitdirectory`），
+  拖拽用 `DataTransferItem.webkitGetAsEntry()`
+- 浏览器把用户选中的文件以 `File` 对象交给页面，页面 `await file.text()` 读出文本，
+  再随 `mn.import.start` 交给插件上传 —— **插件进程全程不碰磁盘**
+- 因此 `manifest.json` 里没有、也不需要任何 `fs.*` 权限
+
+三个必须注意的坑：
+
+1. **不能用 `showDirectoryPicker()`**（File System Access API）。面板是 `file://`
+   页面，不是安全上下文，该 API 直接不可用。`webkitdirectory` 是唯一能拿到目录
+   结构的办法。
+2. **`readEntries` 每次最多返回 100 条**。拖入大目录时必须**循环读到空数组**为止，
+   只调一次会静默丢掉第 100 个之后的文件（不报错，只是少导入）。
+3. **文件拖到页面上时，浏览器默认动作是导航到该文件** —— 面板会被整个替换掉。
+   所以 `drop` 里必须先 `preventDefault()` 再判断登录态；只按「已登录」条件去拦，
+   未登录时拖一次就会把面板弄没。
+
+### 导入的标题为什么不能用 titleFromMarkdown
+
+`titleFromMarkdown` 在没有 H1 时会**退化成正文首行**。用它做导入的标题兜底，
+「一篇没有标题的笔记」会变成标题＝正文第一句、正文里又重复一遍这句。
+导入场景改用 `h1FromMarkdown`（只认 H1，且跳过围栏代码块），兜底交给文件名：
+
+> front matter 的 `title` → 首个 H1 → 文件名
+
+`stripFrontMatter` 只认**文件最开头**的 `---`，且必须有配对的结束行。正文中间的
+`---` 是水平分割线 —— 误吃会把整篇笔记吞掉，所以「找不到结束行」时宁可不剥。
 
 ---
 

@@ -2,23 +2,23 @@
   "schemaVersion": 1,
   "id": "local.mi-note",
   "name": "小米笔记",
-  "version": "0.2.4",
-  "description": "把小米云笔记做成一个图形化工作面板：扫码登录（手机扫一扫确认，不用密码也不受验证码/两步验证影响）、文件夹下拉 + 笔记列表 + 正文两栏界面、Markdown 编辑与自动保存、搜索、AI 问答、一键退出登录，以及一组内置的笔记操作工具。笔记能力全部内置在插件里，不需要额外配置 MCP 服务器。",
+  "version": "0.2.5",
+  "description": "把小米云笔记做成一个图形化工作面板：扫码登录（手机扫一扫确认，不用密码也不受验证码/两步验证影响）、文件夹下拉 + 笔记列表 + 正文两栏界面、Markdown 编辑与自动保存、搜索、批量导入 Markdown 文件或文件夹、导出 Markdown / HTML、AI 问答、一键退出登录，以及一组内置的笔记操作工具。笔记能力全部内置在插件里，不需要额外配置 MCP 服务器。",
   "i18n": {
     "en": {
       "name": "Mi Note",
-      "description": "Turn Xiaomi Cloud notes into a graphical work panel: QR-code sign-in confirmed on your phone (no password, unaffected by captcha or two-step verification), a two-pane folder-dropdown/notes/body interface, Markdown editing with autosave, search, AI question answering over your notes, one-click sign-out, and built-in tools for reading and writing them. Everything is built into the plugin — no MCP server to configure.",
+      "description": "Turn Xiaomi Cloud notes into a graphical work panel: QR-code sign-in confirmed on your phone (no password, unaffected by captcha or two-step verification), a two-pane folder-dropdown/notes/body interface, Markdown editing with autosave, search, bulk import of Markdown files or folders, Markdown/HTML export, AI question answering over your notes, one-click sign-out, and built-in tools for reading and writing them. Everything is built into the plugin — no MCP server to configure.",
       "safetyNotes": "Note data is stored only in this plugin's own data directory; the plugin never reads or writes your workspace files. Sign-in is a QR code scanned and confirmed on your phone — the plugin never receives your Xiaomi account password. Note content and attachments are sent only to Xiaomi's own cloud API over HTTPS; nothing is sent to any third party. AI question answering calls the model you already configured in PI-Desktop through the host — the plugin holds no API keys."
     },
     "zh-CN": {
       "name": "小米笔记",
-      "description": "把小米云笔记做成一个图形化工作面板：扫码登录（手机扫一扫确认，不用密码也不受验证码/两步验证影响）、文件夹下拉 + 笔记列表 + 正文两栏界面、Markdown 编辑与自动保存、搜索、AI 问答、一键退出登录，以及一组内置的笔记操作工具。笔记能力全部内置在插件里，不需要额外配置 MCP 服务器。",
+      "description": "把小米云笔记做成一个图形化工作面板：扫码登录（手机扫一扫确认，不用密码也不受验证码/两步验证影响）、文件夹下拉 + 笔记列表 + 正文两栏界面、Markdown 编辑与自动保存、搜索、批量导入 Markdown 文件或文件夹、导出 Markdown / HTML、AI 问答、一键退出登录，以及一组内置的笔记操作工具。笔记能力全部内置在插件里，不需要额外配置 MCP 服务器。",
       "safetyNotes": "笔记数据仅保存在本插件自己的数据目录，不读取也不写入你的工作区文件。登录用手机扫码确认，插件拿不到你的小米账号密码。笔记正文与附件只经 HTTPS 发往小米自家的云接口，不发送给任何第三方。AI 问答通过宿主调用你已配置的模型，插件不持有任何 API 密钥。"
     }
   },
   "author": "QL",
   "categories": ["productivity", "community"],
-  "changelog": "0.2.4：修复「一掉线就提示登录失效」。根因是续期（silentRefresh）把网络故障与「票据真过期」当成了一回事——掉线时续期请求本身必然失败，于是完好的长效票据被误判为已失效，面板一直挂着「登录已失效，请重新扫码」，而用户照着做只会再撞一次网络错误。现在在传输层（http.js）给连接失败/超时打 network 标记，续期、401 重试、ensureSession 三处都据此区分：网络故障不置 needLogin、错误文案说明是网络问题；票据过期才要求重新扫码。另修复 needLogin 置位后没有自动恢复路径的问题——面板此前从不调用 mn.session.ensure，现改为在失效状态下每轮状态轮询顺带探活一次，网络恢复后状态自动回到正常。0.2.3：插件 id 由 pi.mi-note 改为 local.mi-note。pi. / demo. 是插件市场的保留命名空间，需运营放行；改用 local. 前缀即可从插件中心自行发布。注意：插件数据目录按 id 隔离，已装用户需把 ~/.pi-desktop/plugins/data/pi.mi-note/ 手动改名为 local.mi-note/ 才能延续原有笔记。0.2.2：补全上架市场所需的清单字段——新增 i18n.zh-CN（此前只有 en）、中英双语 safetyNotes、changelog，并把 categories 从 productivity 扩为 productivity + community。0.2.1：导出弹窗布局调整。0.2.0：对标通用 Markdown 写作体验的成批补强——笔记内图片真正显示、代码块语法高亮、KaTeX 公式、表格、嵌套列表、任务列表、引用块合并，并新增编辑器工具栏与快捷键。0.1.x：扫码登录、两栏面板、Markdown 编辑与自动保存、搜索、AI 问答、内置笔记操作工具的初始版本。",
+  "changelog": "0.2.5：新增批量导入 Markdown。面板顶栏多一个「导入」按钮：可以一次多选 .md 文件，也可以选整个文件夹递归导入，并可勾选「保留子文件夹结构」——按来源目录在小米笔记里建出同名文件夹（同名目录自动复用，重复导入不会堆出一串重名文件夹）。也可以直接把文件或文件夹拖进面板。导入时标题按「YAML front matter 的 title → 首个一级标题 → 文件名」三级取值，并去掉那段 front matter。全程不需要任何文件系统权限：文件由你在系统文件选择器里显式选中后交给面板读取，插件进程不碰你的磁盘。0.2.4：修复「一掉线就提示登录失效」。根因是续期（silentRefresh）把网络故障与「票据真过期」当成了一回事——掉线时续期请求本身必然失败，于是完好的长效票据被误判为已失效，面板一直挂着「登录已失效，请重新扫码」，而用户照着做只会再撞一次网络错误。现在在传输层（http.js）给连接失败/超时打 network 标记，续期、401 重试、ensureSession 三处都据此区分：网络故障不置 needLogin、错误文案说明是网络问题；票据过期才要求重新扫码。另修复 needLogin 置位后没有自动恢复路径的问题——面板此前从不调用 mn.session.ensure，现改为在失效状态下每轮状态轮询顺带探活一次，网络恢复后状态自动回到正常。0.2.3：插件 id 由 pi.mi-note 改为 local.mi-note。pi. / demo. 是插件市场的保留命名空间，需运营放行；改用 local. 前缀即可从插件中心自行发布。注意：插件数据目录按 id 隔离，已装用户需把 ~/.pi-desktop/plugins/data/pi.mi-note/ 手动改名为 local.mi-note/ 才能延续原有笔记。0.2.2：补全上架市场所需的清单字段——新增 i18n.zh-CN（此前只有 en）、中英双语 safetyNotes、changelog，并把 categories 从 productivity 扩为 productivity + community。0.2.1：导出弹窗布局调整。0.2.0：对标通用 Markdown 写作体验的成批补强——笔记内图片真正显示、代码块语法高亮、KaTeX 公式、表格、嵌套列表、任务列表、引用块合并，并新增编辑器工具栏与快捷键。0.1.x：扫码登录、两栏面板、Markdown 编辑与自动保存、搜索、AI 问答、内置笔记操作工具的初始版本。",
   "main": "main.js",
   "ui": {
     "panel": "renderer/index.html",

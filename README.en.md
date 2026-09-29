@@ -49,6 +49,14 @@ and attachment images all inlined into a single file — paste into `.html` and 
 with nothing missing). A dark colour scheme is available.
 Export goes through the system clipboard, so it adds **no file read/write permission**.
 
+**Import** — the **Import** button bulk-loads Markdown from your machine: pick several `.md`
+files at once, or a whole folder to **import recursively** (tick "keep subfolder structure" to
+recreate the source directory tree as Xiaomi folders; folders with the same name are reused).
+You can also **drag files or folders straight onto the panel**. Titles are taken from the
+front-matter `title`, then the first H1, then the file name.
+It adds **no file read/write permission** — the files are the ones you explicitly pick in the
+system file chooser.
+
 **Markdown preview** — headings, tables, nested lists, task lists, quotes, code blocks with
 **syntax highlighting**, math (KaTeX, inline `$…$` and block `$$…$$`), images, underline and
 highlight spans all render correctly. Images inside notes are downloaded on demand and cached
