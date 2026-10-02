@@ -616,9 +616,18 @@ function requireService() {
   return service;
 }
 
+/**
+ * Agent 工具调用前的登录守卫。
+ *
+ * 语义（0.2.7 起）：already-logged-in 且最近失败过时才探活一次；探活会顺带
+ * **自动重登**（见 repository.ensureSession），所以 40 分钟的会话到期通常对
+ * 工具调用是透明的 —— 用户不会被要求重新扫码。
+ *
+ * 只有重登真的换不到票，才会抛出带 needLogin 的错误，让模型提示用户去面板扫码。
+ */
 async function requireLogin(svc) {
   if (svc.loggedIn) {
-    // 已登录但可能已失效；只在最近失败过时才主动探活，避免每次工具调用都多打一次接口
+    // 只在最近失败过时才主动探活，避免每次工具调用都多打一次接口
     if (svc.needLogin) {
       const outcome = await svc.ensureSession();
       if (!outcome.ok) {

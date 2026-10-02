@@ -3,6 +3,95 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 版本号写在 `manifest.json` 的 `version` 字段，这里是它每次变化的理由。
 
+## 0.2.7
+
+恢复自动重登：登录不再约 40 分钟失效，重登失败才提示重新扫码。
+
+### 背景
+
+`serviceToken` 是 i.mi.com 的会话 Cookie（无 `expires`），实测寿命约 40 分钟。
+0.2.6 曾判定「换票这条路走不通」，把整条续期链路删掉 —— 但**那次测错了端点**：
+
+- **试过的**：带着 `passToken` 请求 `account.xiaomi.com/pass/serviceLogin?_json=true`。
+  那是**网页交互式**端点，无人交互时只返回图形 / 短信验证的挑战字段
+  （`notificationUrl` / `captchaUrl` / `pwd` / `securityStatus`），且只给「登录前」的
+  临时密钥 `psecurity`、从不给正式的 `ssecurity`。
+- **实际应该走的**：登录入口跳转链
+  `i.mi.com/api/user/login` → `account.xiaomi.com/pass/serviceLogin` → 回 `i.mi.com`。
+  罐里带着 `.xiaomi.com` 域的长效票据 `passToken` / `cUserId` 时，服务端会直接把
+  **新的** `serviceToken` 种回来 —— 无交互、无签名。这正是浏览器里「登录不会掉」的机制。
+
+### 变更
+
+- **`auth.resolveServiceSession`（新增）**：用已持久化的 Cookie 罐重放上述入口链换新票。
+  判定成功只看一件事 —— **罐里有没有出现新的 `serviceToken`**；
+  刻意不去解析落地页里的 `qs` / `callback` 来判断「是不是又跳到登录页」，
+  那需要复刻服务端页面结构，对方一改版就会静默失效。
+- **`auth.followLoginEntry`（抽取）**：把扫码登录的第 1~2 步抽成共用函数，
+  扫码与重登走**同一份**逻辑（此前那段代码只在扫码时跑过，且从来是空罐子）。
+- **`client` 恢复 401 → 重登 → 重试**：收到 401 时先重登一次，成功就用新凭据重试原请求。
+  三条约束写死：
+  1. **只重试一次**（`allowRelogin` 开关），避免「401 → 重登 → 又 401」的无限循环；
+  2. **并发去重**：同步一轮几十个请求可能同时拿到 401，复用进行中的 promise，
+     只重登一次（否则会打出一串并发登录请求，极易触发风控，
+     且后完成的会覆盖先完成的新凭据）；
+  3. **网络故障绝不判失效**：掉线时重登请求本身必然失败，
+     误判会让完好的凭据被当成过期。
+- **`repository.relogin`（新增）**：调 `resolveServiceSession` 并落盘新凭据。
+  带**登出优先**保护：重登期间若用户点了「退出登录」，凭据身份已变，就放弃写入，
+  不把刚清掉的凭据复活。
+- **`repository.ensureSession`**：探活失败且是认证失败时先尝试一次重登，
+  成功则回 `reloggedIn: true`；网络故障依旧只回 `network: true`。
+- **`service.ensureSession`**：重登成功后清 `needLogin` 并补一次增量同步
+  （否则「静默恢复」之后界面仍停在旧数据上）。
+- **`service.runSync` / `requestSync`**：失败按类型落状态 —— 网络故障只记
+  `lastSyncError`、不动 `needLogin`；只有服务端明确判定失效才亮「请重新扫码」。
+  两条路径的分类保持一致，避免面板顶部说「同步失败」、底部又说「正常」。
+
+### 保留
+
+- **扫码登录链路不动**：`create` / `poll` / `settle` 的主流程与新行为一致，
+  只是前两步改走共用的 `followLoginEntry`。
+- **掉线语义不退化**：网络与认证失败的分类仍是唯一判据，网络故障一律不置 `needLogin`。
+- **不引入签名**：不做基于 `ssecurity` 的签名交换（非浏览器主路径、易被风控）。
+- **不新增网络目标**：仍只与 `i.mi.com` / `account.xiaomi.com` 通信，数据边界不变。
+
+### 代码审查修正
+
+实现完成后做了一轮对抗式审查，改掉 5 个缺陷（都已补回归测试钉住）：
+
+1. **HIGH —— 把「过期的旧票」判成重登成功（最危险的一条）**。罐子是拿旧凭据
+   预置的，而 `serviceToken` 是会话 Cookie（无 `expires`），旧值会一直躺在罐里。
+   原先只看「罐里有没有票」，重放失败时也会读到那张已过期的旧票 → 判成功 →
+   仓库清掉 `needLogin`、面板停止提示 → 下次同步再 401 → 来回抖动，
+   用户永远等不到「请重新扫码」。改为必须出现**与旧值不同**的新票才算成功。
+2. **MEDIUM —— 同一个失败连打两轮登录请求**。401 已在 `client.send` 里重登过一次，
+   `ensureSession` 又试一次；面板开着时每 20 秒轮询，会把登录接口刷成风控。
+   客户端重登失败时给错误打 `reloginAttempted` 标记，`ensureSession` 见标记不再重复。
+3. **MEDIUM —— 直接调 `repository.relogin()` 时没把新凭据灌回客户端**。
+   客户端会继续拿旧罐子（`activeServiceToken` 读旧票 → 立刻又 401），
+   且 `flushCredentialsWrite()` 是拿客户端做快照的，在途回写会把新凭据覆盖回旧的。
+4. **LOW —— 5xx 被反推成「登录已失效」**。`service.ensureSession` 原先用
+   「不是网络故障就当成失效」，把服务端 5xx / 解析错误也算进去，用户照做只会再撞一次。
+   改为只看仓库给的明确 `needLogin` 信号。
+5. **LOW —— 网络抖动会把已有的失效提示清掉**。同步失败时原先无条件
+   `needLogin = error?.needLogin === true`，会把正在显示的「请重新扫码」清成 false，
+   而面板的自动恢复探活以 `needLogin` 为前提 —— 恢复要白等到下一个 5 分钟定时器。
+   改为只在明确 `needLogin` 时置位，其余情况保持原值。
+
+顺带把 `runSync` / `requestSync` 合并到同一个 `_runSyncJob`，避免两条路径的分类漂移。
+
+### 约定
+
+- 新增回归测试 `tools/ui-harness/auto-relogin.test.js`（13 项）：打桩 `http.request`，
+  断言重放取到新票、无票时抛 `needLogin`、网络故障带 `network`、
+  401 只重登一次、并发 401 只重登一次、重登期间登出不落盘。
+- 新增回归测试 `tools/ui-harness/offline-refresh.test.js`（9 项）：
+  掉线不被判成登录失效、重登成功清状态并补同步、5xx 如实回报。
+- `tools/verify.js` 的「不做自动续期」断言块改写为「自动重登」新契约：
+  既锁住新机制与三条安全约束，也锁住**已被证伪的旧做法不得回流**，
+  并把「0.2.6 走错端点」这段结论留在代码注释里，避免后来者重蹈覆辙。
+
 ## 0.2.6
 
 取消自动续期。凭据失效时如实提示重新扫码，不再悄悄尝试换票。

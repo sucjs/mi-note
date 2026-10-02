@@ -41,7 +41,8 @@ tools/embed-assets.js   把导出要用的样式/字体内联成 renderer/lib/as
 tools/verify.js         校验产物
 tools/ui-harness/       浏览器里复现宿主窗口 chrome 的调试台
   import.test.js           批量导入回归（标题解析 + 文件夹编排）
-  offline-refresh.test.js  掉线误判 + 无续期回归（网络故障 vs 登录失效）
+  offline-refresh.test.js  掉线误判回归（网络故障 vs 登录失效）
+  auto-relogin.test.js     自动重登回归（重放入口链 / 单次重试 / 并发去重）
 ```
 
 > **为什么工具不放在插件目录里**：`pack.js` 会打包插件目录下除 `.git` /
@@ -54,7 +55,8 @@ node tools/embed-assets.js     # 改了 vendor 样式/字体后必须先跑（�
 node tools/pack.js mi-note     # → mi-note/dist/local.mi-note-<版本>.piplug
 node tools/verify.js           # 校验产物（末尾打印通过 / 失败项数）
 node tools/ui-harness/import.test.js           # 批量导入回归
-node tools/ui-harness/offline-refresh.test.js  # 掉线误判 / 无续期回归
+node tools/ui-harness/offline-refresh.test.js  # 掉线误判回归
+node tools/ui-harness/auto-relogin.test.js     # 自动重登回归
 ```
 
 > 校验脚本**不写死项数**：断言会随修复增加，写死的数字必然漂移成假信息。
@@ -142,113 +144,44 @@ await client.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   2. `CHANGELOG.md` 顶部加同号小节（`verify.js` 会校验两者一致）
   3. `node tools/pack.js mi-note` 重新打包（否则 `dist/` 里留着旧版本名的文件）
 
----
 
-## 实现说明
+## 登录与自动重登
 
-### 为什么用原生 `node:http` 而不是 `pi.net.fetch`
+登录态是一张 `serviceToken` 会话 Cookie（无 `expires`），实测寿命约 40 分钟。
+**浏览器里「登录不会掉」靠的不是这张票本身**，而是它失效后能自动换一张新的 ——
+插件走同一条路：
 
-宿主把响应头收进普通对象（`res.headers.forEach`），多个 `Set-Cookie` 会互相覆盖；
-而小米扫码登录恰恰依赖「一次响应里的多个 Set-Cookie」建立会话。同理，登录涉及跨
-`xiaomi.com` / `mi.com` 的 cookie 域匹配，需要一个真实的 cookie 罐。
-
-### 为什么长任务走 job + 轮询
-
-宿主转发面板通道调用的超时是 30 秒，而全量同步、模型问答、批量导入都可能跑几分钟。所以
-`mn.login.start` / `mn.sync.start` / `mn.ask` / `mn.import.start` 都是立即返回 `jobId`，
-由页面轮询 `mn.job.get` 取进度与结果。
-
-### 为什么布局用纯 CSS 栅格
-
-面板最初是「文件夹 + 列表 + 正文」三栏 + 可拖动分隔条。这套方案在无边框 Electron
-窗口里迭代四轮仍不稳定：指针捕获失效、拖动死区、窗口缩放把宽度写死、编辑区硬约束
-导致窄窗口下拖动完全冻结。
-
-最终改成固定比例栅格：
-
-```css
-grid-template-columns: minmax(240px, min(300px, 42%)) minmax(0, 1fr);
+```
+GET  https://i.mi.com/api/user/login        # 问登录入口
+  →  302 https://account.xiaomi.com/pass/serviceLogin?…
+  →  带 .xiaomi.com 域的 passToken / cUserId 时，服务端 302 回 i.mi.com
+     并在 Set-Cookie 里种下新的 serviceToken
 ```
 
-**JS 完全不参与宽度计算**，整类问题从根上消失。
-教训：能用 CSS 表达的布局就不要用 JS 算。
+实现分布在四处，改动时**必须一起看**：
 
-### 删除为什么用「延迟提交」
+| 位置 | 职责 |
+| --- | --- |
+| `auth.followLoginEntry` | 走完上面这条跳转链（扫码与重登**共用**，不另写一份） |
+| `auth.resolveServiceSession` | 用已存 Cookie 罐重放该链换新票；判据只看「罐里有没有新 `serviceToken`」 |
+| `client.relogin` / `send` | 401 → 重登一次 → 用新凭据重试原请求 |
+| `repository.relogin` / `ensureSession` | 落盘新凭据、登出优先保护、探活失败时先重登 |
 
-服务端没有「从回收站恢复」的接口，所以撤销不能靠删完再恢复。面板采用延迟提交：
-乐观删除（加入 `state.pendingDelete` 并从列表隐藏）+ 6 秒撤销窗口，超时才真正提交。
+三条**不可简化**的约束（各有回归测试钉住）：
 
-两个必须的配套处理：
+1. **只重试一次** —— `allowRelogin` 开关。去掉就会「401 → 重登 → 又 401」无限循环。
+2. **并发去重** —— 复用进行中的 promise。同步一轮几十个请求会同时拿到 401，
+   不去重就会打出一串并发登录请求（易触发风控），且后完成的会覆盖新凭据。
+3. **网络故障绝不判失效** —— 掉线时重登请求本身必然失败；
+   误判会让完好的凭据被当成过期，逼用户白重扫一次码。
 
-- 列表渲染要过滤 `pendingDelete`，否则 5 分钟自动同步把云端数据拉回来后，
-  已删笔记会「复活」出现在列表里
-- 待删笔记若正开着，要先清空编辑器
+> ⚠️ **别把 0.2.6 的结论当成最终结论**。0.2.6 曾判定「换票走不通」并删掉整条续期，
+> 原因是测了 `pass/serviceLogin?_json=true` 这个**网页交互式**端点 ——
+> 它无人交互时只返回验证挑战（`notificationUrl` / `captchaUrl` / `pwd` /
+> `securityStatus`），只给 `psecurity` 不给 `ssecurity`。那是**错的端点**，
+> 浏览器并不走它。这段结论留在 `lib/auth.js` 顶部注释里，`verify.js` 会断言它还在。
 
-### 自动保存的并发与落盘
-
-- **IME**：`compositionstart/end` 期间只更新内存，不触发保存
-- **并发**：`saveInFlight` 复用同一个 Promise；保存期间用户继续输入则比对快照，
-  不一致就再排一次自动保存
-- **落盘**：`repository.updateNote` 原本每次都整份重写磁盘缓存，自动保存下会持续
-  占盘。改为 10 秒合并窗口（`scheduleCacheWrite`），同步完成 / 删除 / 退出时立即落盘
-- **关闭兜底**：`pagehide` + `visibilitychange` 尽力冲刷，失败方向选「本地未保存」而非报错
-
-### 列表局部更新
-
-`noteNodes: Map<id, entry>` + `createNoteNode` / `updateNoteNode` 分离，
-`renderNotes` 用 `insertBefore(el, cursor)` 按序摆位（顺序没变则零 DOM 移动），
-只写真正变化的文本。
-
-**关键收益**：保存后不再 `await loadNotes()` 整份重拉，改用 `refreshNoteInList(note)`
-单篇更新 —— 实测保存时 `notesList` 调用数为 0。否则每次自动保存都要重建最多 300 个节点。
-
-### 提示条为什么要堆叠
-
-所有提示曾经共用一个 DOM 元素，`toast()` 里的 `textContent = message` 会**连「撤销」
-按钮一起抹掉**，但 6 秒计时器仍在跑 → 笔记照样被删且无法撤销（**丢数据**）。
-
-现在用 `.toast-stack` 容器，每条提示是独立元素，最多 3 条共存。
-
-### 切编辑/预览为什么不能无条件抓光标快照
-
-`renderEditor` 是销毁重建。从预览切回编辑时页面上没有 textarea，
-`captureEditorView()` 返回 `null`，**无条件赋值会把上一步存好的快照覆盖成 null**，
-光标照样丢。必须只在 `state.mode === "edit"` 时抓。
-
-### 批量导入为什么不需要 fs 权限
-
-面板对外承诺「不读也不写你的工作区文件」，导出功能为此走剪贴板而不是写文件。
-导入看似必须读文件，其实有一条同样不碰权限的路：**让用户显式选中文件**。
-
-- 选文件 / 选目录用 `<input type="file">`（目录靠 `webkitdirectory`），
-  拖拽用 `DataTransferItem.webkitGetAsEntry()`
-- 浏览器把用户选中的文件以 `File` 对象交给页面，页面 `await file.text()` 读出文本，
-  再随 `mn.import.start` 交给插件上传 —— **插件进程全程不碰磁盘**
-- 因此 `manifest.json` 里没有、也不需要任何 `fs.*` 权限
-
-三个必须注意的坑：
-
-1. **不能用 `showDirectoryPicker()`**（File System Access API）。面板是 `file://`
-   页面，不是安全上下文，该 API 直接不可用。`webkitdirectory` 是唯一能拿到目录
-   结构的办法。
-2. **`readEntries` 每次最多返回 100 条**。拖入大目录时必须**循环读到空数组**为止，
-   只调一次会静默丢掉第 100 个之后的文件（不报错，只是少导入）。
-3. **文件拖到页面上时，浏览器默认动作是导航到该文件** —— 面板会被整个替换掉。
-   所以 `drop` 里必须先 `preventDefault()` 再判断登录态；只按「已登录」条件去拦，
-   未登录时拖一次就会把面板弄没。
-
-### 导入的标题为什么不能用 titleFromMarkdown
-
-`titleFromMarkdown` 在没有 H1 时会**退化成正文首行**。用它做导入的标题兜底，
-「一篇没有标题的笔记」会变成标题＝正文第一句、正文里又重复一遍这句。
-导入场景改用 `h1FromMarkdown`（只认 H1，且跳过围栏代码块），兜底交给文件名：
-
-> front matter 的 `title` → 首个 H1 → 文件名
-
-`stripFrontMatter` 只认**文件最开头**的 `---`，且必须有配对的结束行。正文中间的
-`---` 是水平分割线 —— 误吃会把整篇笔记吞掉，所以「找不到结束行」时宁可不剥。
-
----
+**不做**基于 `ssecurity` 的签名交换：证据不足、易被风控，且不是浏览器的主路径。
 
 ## 权限与数据边界
 
